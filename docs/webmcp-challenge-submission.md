@@ -144,6 +144,6 @@ After the challenge, ReadMate can add more African language voices, stronger eva
 - [ ] Public YouTube video is under three minutes and includes audible Twi playback.
 - [ ] The final take satisfies every stop condition in `docs/webmcp-demo-runbook.md`; no local-only success is presented as the submitted live build.
 - [ ] Video contains clear spoken audio, no unlicensed music, and no unrelated third-party marks or private notifications.
-- [ ] Devpost description links to `[LIVE_APP_URL]`, `[PUBLIC_REPOSITORY_URL]`, and `[PUBLIC_VIDEO_URL]`.
+- [ ] Devpost description links to `[LIVE_APP_URL]`, `https://github.com/n-Qube/readmate-ai`, and `[PUBLIC_VIDEO_URL]`.
 - [ ] The live app and judge credentials remain free and available through the end of judging; the submitted build/repository is frozen after the deadline.
 - [ ] No unverified App Store, Google Play, or Chrome Web Store approval claim appears in the submission.

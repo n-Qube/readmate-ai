@@ -2,7 +2,7 @@
 
 This document distinguishes the pre-existing ReadMate product from the work added for the OpenAI WebMCP Challenge submission period, which began August 25, 2026. It is intended to accompany dated public commits as the equivalent source-level evidence required for a pre-existing project.
 
-Public challenge commit range: `[CHALLENGE_COMMIT_RANGE]`
+Initial public challenge commit: `4bb9bfa3d2cf4bf051de8b7d28e448066ba73963`
 
 ## Product that existed before the challenge
 

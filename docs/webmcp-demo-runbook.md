@@ -62,7 +62,7 @@ The action prompts above are part of the demonstration and may be typed or paste
 >
 > Live app: `[LIVE_APP_URL]`
 >
-> Public source: `[PUBLIC_REPOSITORY_URL]`
+> Public source: `https://github.com/n-Qube/readmate-ai`
 >
 > Built for the OpenAI WebMCP Challenge. The demonstrated WebMCP work is documented in the public repository and was added during the challenge period.
 
