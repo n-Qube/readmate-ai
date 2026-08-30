@@ -1,0 +1,281 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ReadingDocument {
+  id                        String    @id @default(cuid())
+  userId                    String
+  title                     String
+  sourceType                String
+  sourceUrl                 String?
+  canonicalUrl              String?
+  rssFeedUrl                String?
+  dedupeKey                 String?
+  category                  String    @default("Uncategorized")
+  sourceLabel               String?
+  thumbnailUrl              String?
+  coverImageUrl             String?
+  author                    String?
+  description               String?
+  contentHtml               String?
+  topicTags                 String    @default("[]")
+  estimatedListeningSeconds Int?
+  pageCount                 Int?
+  status                    String    @default("unread")
+  summary                   String?
+  keyPoints                 String    @default("[]")
+  quizQuestions             String    @default("[]")
+  flashcards                String    @default("[]")
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  lastReadAt                DateTime?
+  deletedAt                 DateTime?
+  chunkIndex                Int       @default(0)
+  characterOffset           Int       @default(0)
+  sentenceIndex             Int       @default(0)
+  percent                   Int       @default(0)
+  provider                  String    @default("google")
+  voice                     String    @default("en-US-Neural2-F")
+  speed                     Float     @default(1)
+
+  blocks                ReadingBlock[]
+  sessions              ReadingSession[]
+  notes                 Note[]
+  highlights            Highlight[]
+  learningFlashcards    LearningFlashcard[]
+  learningQuizQuestions LearningQuizQuestion[]
+  learningQuizAttempts  LearningQuizAttempt[]
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, updatedAt])
+  @@index([userId, lastReadAt])
+  @@index([userId, canonicalUrl])
+  @@index([userId, deletedAt])
+  @@index([userId, status])
+}
+
+model Note {
+  id            String    @id @default(cuid())
+  userId        String
+  documentId    String
+  highlightId   String?
+  noteText      String
+  blockIndex    Int?
+  sentenceIndex Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  document  ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  highlight Highlight?      @relation(fields: [highlightId], references: [id], onDelete: SetNull)
+
+  @@index([userId, documentId, deletedAt])
+  @@index([highlightId])
+}
+
+model Highlight {
+  id            String    @id @default(cuid())
+  userId        String
+  documentId    String
+  blockId       String?
+  blockIndex    Int
+  sentenceIndex Int?
+  highlightText String
+  highlightType String    @default("manual")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  notes    Note[]
+
+  @@index([userId, documentId, deletedAt])
+  @@index([documentId, blockIndex])
+}
+
+model ReadingBlock {
+  id               String   @id @default(cuid())
+  documentId       String
+  orderIndex       Int
+  blockType        String   @default("paragraph")
+  text             String
+  sourceSelector   String?
+  sourcePageNumber Int?
+  createdAt        DateTime @default(now())
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, orderIndex])
+  @@index([documentId, orderIndex])
+}
+
+model ReadingSession {
+  id                    String    @id @default(cuid())
+  userId                String
+  documentId            String
+  startedAt             DateTime  @default(now())
+  endedAt               DateTime?
+  progressPercent       Int       @default(0)
+  totalListeningSeconds Int       @default(0)
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+}
+
+model UserSettings {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  provider              String   @default("google")
+  voice                 String   @default("en-US-Neural2-F")
+  speed                 Float    @default(1)
+  tone                  String?
+  targetLanguage        String   @default("en")
+  preferredContentTypes String   @default("[\"webpage\",\"pdf\",\"rss\",\"url\"]")
+  articlesPerFeed       Int      @default(10)
+  autoScroll            Boolean  @default(true)
+  highlightMode         String   @default("paragraph")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model UploadedFile {
+  id         String   @id @default(cuid())
+  userId     String
+  documentId String?
+  filename   String
+  mimeType   String
+  byteSize   Int
+  storageKey String
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model UsageBucket {
+  userId      String
+  kind        String
+  windowStart DateTime
+  quantity    BigInt   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([userId, kind, windowStart])
+  @@index([userId, updatedAt])
+}
+
+model SourceSubscription {
+  id           String    @id @default(cuid())
+  userId       String
+  sourceName   String
+  websiteUrl   String?
+  rssFeedUrl   String?
+  sourceType   String    @default("website")
+  topics       String    @default("[]")
+  isSubscribed Boolean   @default(true)
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, isSubscribed])
+  @@index([userId, updatedAt])
+}
+
+model LearningFlashcard {
+  id           String    @id @default(cuid())
+  userId       String
+  documentId   String
+  question     String
+  answer       String
+  topicTag     String?
+  difficulty   String    @default("medium")
+  reviewStatus String    @default("new")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, documentId, deletedAt])
+  @@index([userId, reviewStatus])
+}
+
+model LearningQuizQuestion {
+  id            String    @id @default(cuid())
+  userId        String
+  documentId    String
+  question      String
+  questionType  String
+  options       String    @default("[]")
+  correctAnswer String
+  explanation   String
+  topicTag      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, documentId, deletedAt])
+}
+
+model LearningQuizAttempt {
+  id         String   @id @default(cuid())
+  userId     String
+  documentId String
+  answers    String
+  score      Int
+  total      Int
+  correct    Int      @default(0)
+  results    String   @default("[]")
+  createdAt  DateTime @default(now())
+
+  document ReadingDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, documentId, createdAt])
+}
+
+model WebMcpAuditEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  requestId    String?
+  toolName     String
+  actionClass  String
+  status       String
+  resourceType String?
+  resourceId   String?
+  inputDigest  String?
+  actionDigest String?
+  claimToken   String?
+  errorCode    String?
+  latencyMs    Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, requestId, toolName])
+  @@index([userId, createdAt])
+}
+
+model WebMcpStudyPackEffect {
+  id           String   @id @default(cuid())
+  userId       String
+  requestId    String
+  actionDigest String
+  documentId   String
+  status       String
+  errorCode    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, requestId])
+  @@index([userId, createdAt])
+}
+
+model AccountDeletionFence {
+  userHash  String   @id
+  createdAt DateTime @default(now())
+}

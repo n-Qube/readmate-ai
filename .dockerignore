@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+.secrets
+node_modules
+apps/*/node_modules
+apps/*/dist
+apps/extension/dist
+apps/mobile/.expo
+apps/mobile/dist
+coverage
+*.log
+.DS_Store

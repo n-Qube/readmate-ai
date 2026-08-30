@@ -1,0 +1,27 @@
+*.ipa
+*.xcarchive
+*.app
+*.dSYM
+*.mobileprovision
+*.p12
+*.cer
+*.log
+node_modules
+.expo
+/android
+/ios
+!/modules/readmate-airplay/android/
+!/modules/readmate-airplay/android/build.gradle
+!/modules/readmate-airplay/android/src/
+!/modules/readmate-airplay/android/src/**
+!/modules/readmate-airplay/ios/
+!/modules/readmate-airplay/ios/ReadMateAirPlay.podspec
+!/modules/readmate-airplay/ios/ReadMateAirPlayModule.swift
+modules/readmate-airplay/android/build/
+dist
+coverage
+*.aab
+*.apk
+*.tar.gz
+**/* 2.*
+**/* 3

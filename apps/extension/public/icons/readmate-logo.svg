@@ -1,0 +1,20 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="readmateIconGradient" x1="180" y1="160" x2="860" y2="884" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F7AF6"/>
+      <stop offset="0.55" stop-color="#4E63F3"/>
+      <stop offset="1" stop-color="#6C4FEF"/>
+    </linearGradient>
+    <filter id="badgeShadow" x="650" y="116" width="202" height="202" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#263B8F" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect x="144" y="144" width="736" height="736" rx="178" fill="url(#readmateIconGradient)"/>
+  <path d="M322 598C322 468 407 360 512 360C617 360 702 468 702 598" stroke="white" stroke-width="72" stroke-linecap="round"/>
+  <rect x="284" y="548" width="92" height="170" rx="46" fill="white"/>
+  <rect x="648" y="548" width="92" height="170" rx="46" fill="white"/>
+  <g filter="url(#badgeShadow)">
+    <rect x="682" y="148" width="138" height="138" rx="42" fill="white"/>
+    <path d="M751 188V246M722 217H780" stroke="#4E63F3" stroke-width="24" stroke-linecap="round"/>
+  </g>
+</svg>

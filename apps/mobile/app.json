@@ -1,0 +1,100 @@
+{
+  "expo": {
+    "name": "ReadMate",
+    "slug": "readmate-ai",
+    "owner": "nii.nortey",
+    "scheme": "readmate",
+    "version": "1.0.2",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "buildNumber": "146",
+      "icon": "./assets/icon.png",
+      "bundleIdentifier": "ai.readmate.mobile",
+      "associatedDomains": [
+        "webcredentials:clerk.readmate.n-qube.com"
+      ],
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "ai.readmate.mobile",
+      "versionCode": 60,
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f3f7ff"
+      },
+      "permissions": [
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "server"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "headers": {
+            "Origin-Agent-Cluster": "?1",
+            "Permissions-Policy": "tools=(self)",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY"
+          }
+        }
+      ],
+      "expo-secure-store",
+      "@clerk/expo",
+      "expo-apple-authentication",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": true
+        }
+      ],
+      "./plugins/with-ios-scene-lifecycle",
+      "./plugins/with-ios-extension-version-sync",
+      [
+        "expo-widgets",
+        {
+          "bundleIdentifier": "ai.readmate.mobile.widgets",
+          "groupIdentifier": "group.ai.readmate.mobile"
+        }
+      ],
+      "./plugins/with-ios-signing-identity",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#f3f7ff",
+          "imageWidth": 180
+        }
+      ]
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "ba97c283-2128-48b8-b42a-dc257773f59c"
+      }
+    }
+  }
+}

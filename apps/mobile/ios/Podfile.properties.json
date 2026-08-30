@@ -1,0 +1,8 @@
+{
+  "expo.jsEngine": "hermes",
+  "ios.deploymentTarget": "17.0",
+  "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
+  "expo.inlineModules.watchedDirectories": "[]",
+  "ios.buildReactNativeFromSource": "true",
+  "expo.inlineModules.xcodeProjectTargets": "{\"mainTarget\":\"ReadMate\",\"targets\":[]}"
+}

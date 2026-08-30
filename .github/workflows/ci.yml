@@ -1,0 +1,64 @@
+name: release-gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://localhost/readmate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check:publication
+      - run: npm run check:dependencies
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx prisma validate --schema apps/api/prisma/schema.prisma
+      - name: Validate production Expo configuration
+        working-directory: apps/mobile
+        env:
+          APP_VARIANT: production
+          READMATE_RELEASE_BUILD: "1"
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsuZXhhbXBsZS5pbnZhbGlkJA
+          EXPO_PUBLIC_READMATE_API_URL: https://api.example.invalid
+          EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY: appl_ci_public_sdk_key_123456789
+          EXPO_PUBLIC_REVENUECAT_GOOGLE_API_KEY: goog_ci_public_sdk_key_123456789
+        run: npx expo config --type public --json > /dev/null
+      - name: Validate production Expo web export
+        working-directory: apps/mobile
+        env:
+          APP_VARIANT: production
+          WEB_APP_ORIGIN: https://app.example.invalid
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsuZXhhbXBsZS5pbnZhbGlkJA
+          EXPO_PUBLIC_READMATE_API_URL: https://api.example.invalid
+        run: npm run export:web:firebase
+      - name: Exercise Firebase Hosting HTTP contract
+        working-directory: apps/mobile
+        run: npx --yes --package=firebase-tools@15.4.0 -- node scripts/firebase-hosting-emulator.cjs
+      - name: Validate extension release configuration
+        env:
+          READMATE_RELEASE_BUILD: "1"
+          VITE_CLERK_PUBLISHABLE_KEY: pk_live_ci_placeholder
+          VITE_CLERK_SYNC_HOST: https://clerk.example.invalid
+          VITE_READMATE_API_URL: https://api.example.invalid
+          VITE_ENABLE_CLERK_UI: "true"
+        run: npm run build --workspace @readmate/extension

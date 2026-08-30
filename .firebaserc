@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "readmateRelease": "readmate-ai-9df42"
+  },
+  "targets": {
+    "readmate-ai-9df42": {
+      "hosting": {
+        "readmate-web": [
+          "readmate-ai-9df42"
+        ]
+      }
+    }
+  }
+}

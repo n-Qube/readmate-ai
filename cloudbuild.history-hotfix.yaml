@@ -1,0 +1,289 @@
+steps:
+  - id: fetch-generation-locked-sealed-release
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    env:
+      - READMATE_BASELINE_URI=${_BASELINE_SOURCE_URI}
+      - READMATE_BASELINE_GENERATION=${_BASELINE_SOURCE_GENERATION}
+      - READMATE_BASELINE_SHA256=${_BASELINE_ARCHIVE_SHA256}
+      - READMATE_RELEASE_URI=${_SEALED_RELEASE_SOURCE_URI}
+      - READMATE_RELEASE_GENERATION=${_SEALED_RELEASE_SOURCE_GENERATION}
+      - READMATE_RELEASE_SHA256=${_SEALED_RELEASE_ARCHIVE_SHA256}
+      - READMATE_MANIFEST_SHA256=${_EXPECTED_RELEASE_MANIFEST_SHA256}
+    args:
+      - -euo
+      - pipefail
+      - -c
+      - |
+        BASELINE_URI="$${READMATE_BASELINE_URI}"
+        BASELINE_GENERATION="$${READMATE_BASELINE_GENERATION}"
+        EXPECTED_BASELINE_SHA256="$${READMATE_BASELINE_SHA256}"
+        RELEASE_URI="$${READMATE_RELEASE_URI}"
+        RELEASE_GENERATION="$${READMATE_RELEASE_GENERATION}"
+        EXPECTED_RELEASE_SHA256="$${READMATE_RELEASE_SHA256}"
+        EXPECTED_MANIFEST_SHA256="$${READMATE_MANIFEST_SHA256}"
+        WORKSPACE_ROOT="$${READMATE_BUILD_WORKSPACE:-/workspace}"
+
+        case "$${BASELINE_URI}" in
+          gs://billbridge-c684f_cloudbuild/source/*.tgz) ;;
+          *) echo "baseline source must use the pinned ReadMate Cloud Build source bucket" >&2; exit 1 ;;
+        esac
+        [[ "$${BASELINE_URI}" =~ ^gs://billbridge-c684f_cloudbuild/source/[A-Za-z0-9._/-]+\.tgz$ ]] || { echo "baseline source URI contains prohibited characters" >&2; exit 1; }
+        case "$${RELEASE_URI}" in
+          gs://billbridge-c684f_cloudbuild/history-hotfix/releases/*.tgz) ;;
+          *) echo "sealed release source must use the pinned ReadMate history-hotfix prefix" >&2; exit 1 ;;
+        esac
+        [[ "$${BASELINE_URI}" != *"#"* && "$${RELEASE_URI}" != *"#"* ]] || { echo "source URIs must not contain generation suffixes" >&2; exit 1; }
+        [[ "$${BASELINE_GENERATION}" =~ ^[1-9][0-9]*$ && "$${RELEASE_GENERATION}" =~ ^[1-9][0-9]*$ ]] || { echo "source generations must be positive integers" >&2; exit 1; }
+        [[ "$${EXPECTED_BASELINE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || { echo "baseline archive sha256 is invalid" >&2; exit 1; }
+        [[ "$${EXPECTED_RELEASE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || { echo "sealed release archive sha256 is invalid" >&2; exit 1; }
+        [[ "$${EXPECTED_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ ]] || { echo "release manifest sha256 is invalid" >&2; exit 1; }
+        [[ "$${WORKSPACE_ROOT}" == /* ]] || { echo "Cloud Build workspace root must be absolute" >&2; exit 1; }
+        EXPECTED_RELEASE_URI="gs://billbridge-c684f_cloudbuild/history-hotfix/releases/$${EXPECTED_RELEASE_SHA256}/source.tgz"
+        [[ "$${RELEASE_URI}" == "$${EXPECTED_RELEASE_URI}" ]] || { echo "sealed release URI must be content-addressed by its approved sha256" >&2; exit 1; }
+
+        mkdir -p "$${WORKSPACE_ROOT}"
+        if find "$${WORKSPACE_ROOT}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+          echo "Cloud Build workspace is not empty; submit this config with --no-source" >&2
+          exit 1
+        fi
+
+        gcloud storage cp "$${BASELINE_URI}#$${BASELINE_GENERATION}" "$${WORKSPACE_ROOT}/baseline-source.tgz" --do-not-decompress
+        gcloud storage cp "$${RELEASE_URI}#$${RELEASE_GENERATION}" "$${WORKSPACE_ROOT}/release-source.tgz" --do-not-decompress
+
+  - id: verify-generation-locked-sealed-release
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    env:
+      - READMATE_BASELINE_URI=${_BASELINE_SOURCE_URI}
+      - READMATE_BASELINE_GENERATION=${_BASELINE_SOURCE_GENERATION}
+      - READMATE_BASELINE_SHA256=${_BASELINE_ARCHIVE_SHA256}
+      - READMATE_RELEASE_SHA256=${_SEALED_RELEASE_ARCHIVE_SHA256}
+      - READMATE_MANIFEST_SHA256=${_EXPECTED_RELEASE_MANIFEST_SHA256}
+    args:
+      - -euo
+      - pipefail
+      - -c
+      - |
+        BASELINE_URI="$${READMATE_BASELINE_URI}"
+        BASELINE_GENERATION="$${READMATE_BASELINE_GENERATION}"
+        EXPECTED_BASELINE_SHA256="$${READMATE_BASELINE_SHA256}"
+        EXPECTED_RELEASE_SHA256="$${READMATE_RELEASE_SHA256}"
+        EXPECTED_MANIFEST_SHA256="$${READMATE_MANIFEST_SHA256}"
+        WORKSPACE_ROOT="$${READMATE_BUILD_WORKSPACE:-/workspace}"
+
+        python3 - \
+          "$${WORKSPACE_ROOT}/baseline-source.tgz" \
+          "$${WORKSPACE_ROOT}/release-source.tgz" \
+          "$${WORKSPACE_ROOT}/release" \
+          "$${BASELINE_URI}" \
+          "$${BASELINE_GENERATION}" \
+          "$${EXPECTED_BASELINE_SHA256}" \
+          "$${EXPECTED_RELEASE_SHA256}" \
+          "$${EXPECTED_MANIFEST_SHA256}" <<'PY'
+        import hashlib
+        import json
+        import os
+        import shutil
+        import stat
+        import sys
+        import tarfile
+        from pathlib import Path, PurePosixPath
+
+        baseline_archive = Path(sys.argv[1])
+        release_archive = Path(sys.argv[2])
+        output_root = Path(sys.argv[3])
+        baseline_uri = sys.argv[4]
+        baseline_generation = sys.argv[5]
+        expected_baseline_sha = sys.argv[6]
+        expected_release_sha = sys.argv[7]
+        expected_manifest_sha = sys.argv[8]
+        manifest_name = "history-hotfix-release-manifest.json"
+        required_changes = sorted([
+            "apps/api/src/routes/documents.test.ts",
+            "apps/api/src/routes/documents.ts",
+            "scripts/deploy-cloud-run-history-hotfix-candidate.sh",
+        ])
+        root_markers = ("Dockerfile", "package-lock.json", "apps/api/package.json")
+        max_members = 50_000
+        max_expanded_bytes = 1_073_741_824
+
+        def fail(message):
+            raise SystemExit(message)
+
+        def sha256_file(path):
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+
+        def normalized_member(name):
+            if "\\" in name or any(ord(character) < 32 or ord(character) == 127 for character in name):
+                fail(f"archive member name is not permitted: {name!r}")
+            path = PurePosixPath(name)
+            parts = tuple(part for part in path.parts if part not in ("", "."))
+            if not parts:
+                return None
+            if path.is_absolute() or ".." in parts or ".git" in parts:
+                fail(f"archive member path is not permitted: {name!r}")
+            return PurePosixPath(*parts)
+
+        def extract(archive_path, destination, label):
+            destination = destination.resolve()
+            destination.mkdir(parents=True, exist_ok=False)
+            try:
+                archive = tarfile.open(archive_path, mode="r:*")
+            except (tarfile.TarError, OSError) as error:
+                fail(f"{label} is not a readable tar archive: {error}")
+            with archive:
+                members = archive.getmembers()
+                if len(members) > max_members:
+                    fail(f"{label} has too many members")
+                if sum(member.size for member in members if member.isfile()) > max_expanded_bytes:
+                    fail(f"{label} expands beyond the approved size limit")
+                seen = set()
+                seen_casefolded = set()
+                for member in members:
+                    relative = normalized_member(member.name)
+                    if relative is None:
+                        continue
+                    name = relative.as_posix()
+                    if name in seen or name.casefold() in seen_casefolded:
+                        fail(f"{label} has a duplicate or case-folding collision: {name}")
+                    seen.add(name)
+                    seen_casefolded.add(name.casefold())
+                    if member.issym() or member.islnk() or (not member.isdir() and not member.isfile()):
+                        fail(f"{label} has a prohibited member type: {name}")
+                    if member.mode & (stat.S_ISUID | stat.S_ISGID):
+                        fail(f"{label} has a prohibited setuid/setgid mode: {name}")
+                    target = destination.joinpath(*relative.parts)
+                    if os.path.commonpath((str(destination), str(target.resolve(strict=False)))) != str(destination):
+                        fail(f"{label} member escapes extraction root: {name}")
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        target.chmod(stat.S_IMODE(member.mode))
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source = archive.extractfile(member)
+                    if source is None:
+                        fail(f"{label} member has no readable contents: {name}")
+                    with source, target.open("xb") as output:
+                        shutil.copyfileobj(source, output)
+                    target.chmod(stat.S_IMODE(member.mode))
+            top_level = sorted(destination.iterdir(), key=lambda path: path.name)
+            root = top_level[0] if len(top_level) == 1 and top_level[0].is_dir() else destination
+            missing = [marker for marker in root_markers if not (root / marker).is_file()]
+            if missing:
+                fail(f"{label} is not an unambiguous ReadMate root; missing {missing}")
+            return root
+
+        def source_entries(root):
+            entries = {}
+            for path in sorted(root.rglob("*"), key=lambda candidate: candidate.as_posix()):
+                relative = path.relative_to(root).as_posix()
+                if relative == manifest_name or ".git" in Path(relative).parts:
+                    continue
+                if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+                    fail(f"verified source contains a prohibited entry: {relative}")
+                if path.is_file():
+                    entries[relative] = {
+                        "kind": "file",
+                        "mode": stat.S_IMODE(path.stat().st_mode),
+                        "sha256": sha256_file(path),
+                    }
+            return entries
+
+        def tree_sha(entries):
+            canonical = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+            return hashlib.sha256(canonical).hexdigest()
+
+        actual_baseline_sha = sha256_file(baseline_archive)
+        actual_release_sha = sha256_file(release_archive)
+        if actual_baseline_sha != expected_baseline_sha:
+            fail("baseline archive sha256 mismatch")
+        if actual_release_sha != expected_release_sha:
+            fail("sealed release archive sha256 mismatch")
+
+        baseline_root = extract(baseline_archive, output_root.parent / "baseline-extracted", "baseline archive")
+        release_root = extract(release_archive, output_root.parent / "release-extracted", "sealed release archive")
+        baseline_entries = source_entries(baseline_root)
+        release_entries = source_entries(release_root)
+        actual_changes = sorted(
+            path for path in set(baseline_entries) | set(release_entries)
+            if baseline_entries.get(path) != release_entries.get(path)
+        )
+        if actual_changes != required_changes:
+            fail(f"sealed release changed files outside the exact history hotfix scope: {actual_changes!r}")
+
+        manifest_path = release_root / manifest_name
+        if not manifest_path.is_file():
+            fail("sealed release manifest is missing")
+        raw_manifest = manifest_path.read_bytes()
+        if hashlib.sha256(raw_manifest).hexdigest() != expected_manifest_sha:
+            fail("sealed release manifest sha256 mismatch")
+        try:
+            manifest = json.loads(raw_manifest)
+        except json.JSONDecodeError as error:
+            fail(f"sealed release manifest is invalid JSON: {error}")
+        canonical_manifest = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+        if raw_manifest != canonical_manifest:
+            fail("sealed release manifest is not canonical JSON")
+        expected_manifest_fields = {
+            "schemaVersion": 1,
+            "baselineSourceUri": baseline_uri,
+            "baselineSourceGeneration": baseline_generation,
+            "baselineArchiveSha256": actual_baseline_sha,
+            "baselineTreeSha256": tree_sha(baseline_entries),
+            "releaseTreeSha256": tree_sha(release_entries),
+            "allowedChangedFiles": actual_changes,
+        }
+        for key, expected in expected_manifest_fields.items():
+            if manifest.get(key) != expected:
+                fail(f"sealed release manifest field {key} does not match verified source")
+
+        shutil.copytree(release_root, output_root)
+        print(f"baseline_source_uri={baseline_uri}")
+        print(f"baseline_source_generation={baseline_generation}")
+        print(f"baseline_archive_sha256={actual_baseline_sha}")
+        print(f"sealed_release_archive_sha256={actual_release_sha}")
+        print(f"release_manifest_sha256={expected_manifest_sha}")
+        print("changed_files=" + ",".join(actual_changes))
+        print("source_isolation=generation-locked-baseline-and-sealed-release")
+        PY
+
+  - id: api-tests
+    name: gcr.io/cloud-builders/docker
+    dir: release
+    args:
+      - build
+      - --target
+      - test
+      - .
+
+  - id: build-history-hotfix-image
+    name: gcr.io/cloud-builders/docker
+    dir: release
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/billbridge-c684f/readmate/readmate-api:history-hotfix-$BUILD_ID
+      - .
+
+  - id: push-history-hotfix-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-central1-docker.pkg.dev/billbridge-c684f/readmate/readmate-api:history-hotfix-$BUILD_ID
+
+  - id: deploy-no-traffic-history-hotfix-candidate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    dir: release
+    entrypoint: bash
+    args:
+      - scripts/deploy-cloud-run-history-hotfix-candidate.sh
+      - us-central1-docker.pkg.dev/billbridge-c684f/readmate/readmate-api:history-hotfix-$BUILD_ID
+      - $BUILD_ID
+
+images:
+  - us-central1-docker.pkg.dev/billbridge-c684f/readmate/readmate-api:history-hotfix-$BUILD_ID

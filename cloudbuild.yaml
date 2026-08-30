@@ -1,0 +1,63 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --target
+      - test
+      - .
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - scripts/preflight-cloud-run-release.sh
+      - $PROJECT_ID
+      - ${_EXTENSION_ORIGIN}
+      - ${_WEB_APP_ORIGIN}
+      - ${_ENABLE_REVENUECAT}
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --target
+      - migration
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api-migration:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    secretEnv:
+      - DATABASE_MIGRATION_URL
+    args:
+      - -c
+      - docker run --rm -e DATABASE_URL="$${DATABASE_MIGRATION_URL}" ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api-migration:$BUILD_ID
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api:$BUILD_ID
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - scripts/deploy-cloud-run-candidate.sh
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api:$BUILD_ID
+      - ${_REGION}
+      - readmate-api
+      - ${_EXTENSION_ORIGIN}
+      - ${_WEB_APP_ORIGIN}
+      - $PROJECT_ID
+      - $BUILD_ID
+      - ${_ENABLE_REVENUECAT}
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/readmate/readmate-api:$BUILD_ID
+substitutions:
+  _REGION: us-central1
+  _EXTENSION_ORIGIN: ""
+  _WEB_APP_ORIGIN: ""
+  _ENABLE_REVENUECAT: "false"
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/readmate-database-migration-url/versions/latest
+      env: DATABASE_MIGRATION_URL

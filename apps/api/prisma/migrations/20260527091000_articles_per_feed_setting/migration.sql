@@ -1,0 +1,1 @@
+ALTER TABLE "UserSettings" ADD COLUMN "articlesPerFeed" INTEGER NOT NULL DEFAULT 10;

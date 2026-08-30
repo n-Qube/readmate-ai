@@ -1,0 +1,57 @@
+{
+  "name": "readmate-ai",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Cross-device reading, local-language listening, and WebMCP study companion.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/patch-expo-modules-jsi-xcode27.cjs",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check:secrets": "node scripts/check-secrets.js --history",
+    "check:secrets:workspace": "node scripts/check-secrets.js --workspace --history",
+    "check:publication": "npm run check:secrets && node scripts/check-publication-readiness.mjs",
+    "check:publication:final": "npm run check:secrets && node scripts/check-publication-readiness.mjs --final",
+    "check:dependencies": "node scripts/check-dependencies.js",
+    "verify:release": "npm run check:secrets:workspace && npm run check:dependencies && npm run typecheck && npm test && npm run build",
+    "dev:extension": "npm run dev -w apps/extension",
+    "dev:api": "npm run dev -w apps/api",
+    "validate:web-deployment": "npm run validate:web-deployment -w apps/mobile",
+    "export:web": "npm run export:web -w apps/mobile",
+    "prepare:firebase-hosting": "npm run prepare:firebase-hosting -w apps/mobile",
+    "validate:firebase-hosting": "npm run validate:firebase-hosting -w apps/mobile",
+    "validate:firebase-hosting-release": "npm run validate:firebase-hosting-release -w apps/mobile",
+    "hash:firebase-hosting": "npm run hash:firebase-hosting -w apps/mobile",
+    "export:web:firebase": "npm run export:web:firebase -w apps/mobile",
+    "deploy:firebase-hosting:guarded": "npm run deploy:firebase-hosting:guarded -w apps/mobile",
+    "test:firebase-hosting": "npm run test:firebase-hosting -w apps/mobile",
+    "test:firebase-hosting:emulator": "npm run test:firebase-hosting:emulator -w apps/mobile"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "metro": "0.84.5",
+    "metro-config": "0.84.5",
+    "metro-transform-worker": "0.84.5"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.306",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.11"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.60.4"
+  },
+  "dependencies": {
+    "expo": "~56.0.8",
+    "react": "19.2.3",
+    "react-native": "0.85.3"
+  }
+}

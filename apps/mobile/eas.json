@@ -1,0 +1,88 @@
+{
+  "cli": {
+    "version": ">= 23.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "APP_VARIANT": "development",
+        "EXPO_USE_PRECOMPILED_MODULES": "false"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "APP_VARIANT": "preview",
+        "EXPO_USE_PRECOMPILED_MODULES": "false"
+      }
+    },
+    "device": {
+      "distribution": "internal",
+      "autoIncrement": true,
+      "environment": "production",
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      },
+      "env": {
+        "APP_VARIANT": "production",
+        "READMATE_RELEASE_BUILD": "1",
+        "READMATE_DEVICE_BUILD_NO_WIDGET": "1",
+        "EXPO_USE_PRECOMPILED_MODULES": "false"
+      }
+    },
+    "store-internal": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "environment": "production",
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      },
+      "env": {
+        "APP_VARIANT": "production",
+        "READMATE_RELEASE_BUILD": "1"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "environment": "production",
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      },
+      "env": {
+        "APP_VARIANT": "production",
+        "READMATE_RELEASE_BUILD": "1"
+      }
+    }
+  },
+  "submit": {
+    "store-internal": {
+      "ios": {
+        "ascAppId": "6772259378"
+      },
+      "android": {
+        "track": "internal"
+      }
+    },
+    "internal": {
+      "ios": {
+        "ascAppId": "6772259378"
+      },
+      "android": {
+        "track": "internal"
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "6772259378"
+      },
+      "android": {
+        "track": "production"
+      }
+    }
+  }
+}

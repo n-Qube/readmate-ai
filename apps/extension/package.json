@@ -1,0 +1,27 @@
+{
+  "name": "@readmate/extension",
+  "version": "0.1.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "rm -rf dist && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/chrome-extension": "^3.1.29",
+    "@vitejs/plugin-react": "^6.1.0",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "jsdom": "^25.0.1",
+    "vite": "8.2.2"
+  }
+}

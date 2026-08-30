@@ -1,0 +1,1 @@
+ALTER TABLE "ReadingDocument" ADD COLUMN "sentenceIndex" INTEGER NOT NULL DEFAULT 0;

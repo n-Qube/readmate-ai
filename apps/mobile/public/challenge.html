@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="ReadMate AI turns a reading library into six safe WebMCP tools for search, listening, saving, RSS, and study—with Twi text-to-speech.">
+    <meta property="og:title" content="ReadMate AI — OpenAI WebMCP Challenge">
+    <meta property="og:description" content="Search, save, listen, and study through six user-controlled WebMCP tools, with a Twi listening demo.">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="ReadMate AI — OpenAI WebMCP Challenge">
+    <meta name="twitter:description" content="A reading companion with six safe WebMCP tools and Twi text-to-speech.">
+    <title>ReadMate AI — WebMCP Challenge</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f5f1e8;
+        --surface: #fffdf8;
+        --ink: #21231e;
+        --muted: #686c62;
+        --forest: #1f2a24;
+        --teal: #2f6861;
+        --teal-soft: #dfece8;
+        --claret: #7b3f4b;
+        --claret-soft: #f0e3e5;
+        --line: rgba(33, 35, 30, 0.14);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; background: var(--paper); color: var(--ink); font-size: 17px; line-height: 1.6; }
+      a { color: inherit; text-underline-offset: 4px; }
+      .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+      .nav { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 78px; }
+      .brand { display: inline-flex; align-items: center; gap: 11px; font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 700; text-decoration: none; }
+      .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--forest); color: white; font: 800 18px/1 Georgia, serif; }
+      .nav-links { display: flex; align-items: center; gap: 20px; color: var(--muted); font-size: 14px; font-weight: 750; }
+      .hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); gap: 24px; padding: 52px 0 42px; }
+      .hero-copy, .demo-card { border: 1px solid var(--line); background: var(--surface); }
+      .hero-copy { padding: clamp(32px, 6vw, 72px); border-radius: 36px; }
+      .eyebrow { margin: 0 0 17px; color: var(--claret); font-size: 13px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+      h1, h2, h3 { margin-top: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.08; }
+      h1 { max-width: 760px; margin-bottom: 24px; font-size: clamp(48px, 7vw, 82px); letter-spacing: -.045em; }
+      h2 { margin-bottom: 14px; font-size: clamp(32px, 5vw, 48px); letter-spacing: -.025em; }
+      h3 { margin-bottom: 8px; font-size: 22px; }
+      .lead { max-width: 720px; margin: 0; color: var(--muted); font-size: clamp(18px, 2.4vw, 22px); }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+      .button { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; padding: 0 22px; border-radius: 999px; background: var(--forest); color: white; font-weight: 800; text-decoration: none; }
+      .button.secondary { border: 1px solid var(--line); background: transparent; color: var(--claret); }
+      .demo-card { display: flex; flex-direction: column; justify-content: space-between; gap: 34px; padding: 30px; border-radius: 28px; background: var(--forest); color: #fffdf8; }
+      .demo-card .eyebrow { color: #b9d8cf; }
+      .demo-card p { color: #d9dfda; }
+      .language-list { display: grid; gap: 10px; }
+      .language { display: flex; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.15); border-radius: 14px; }
+      .language strong { color: #fffdf8; }
+      .language span { color: #b9d8cf; font-size: 14px; }
+      section { padding: 52px 0; }
+      .section-intro { max-width: 730px; margin-bottom: 26px; color: var(--muted); }
+      .tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+      .tool { min-height: 215px; padding: 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); }
+      .tool code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; margin-bottom: 18px; padding: 6px 9px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); font-size: 12px; font-weight: 750; }
+      .tool p { margin-bottom: 0; color: var(--muted); }
+      .walkthrough { display: grid; grid-template-columns: .85fr 1.15fr; gap: 24px; align-items: start; }
+      .steps { display: grid; gap: 12px; counter-reset: step; }
+      .step { position: relative; padding: 20px 22px 20px 66px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); counter-increment: step; }
+      .step::before { content: counter(step); position: absolute; top: 18px; left: 20px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; background: var(--claret-soft); color: var(--claret); font-weight: 850; }
+      .step strong { display: block; margin-bottom: 3px; }
+      .step span { color: var(--muted); }
+      .safety { padding: clamp(28px, 5vw, 52px); border: 1px solid var(--line); border-radius: 28px; background: var(--teal-soft); }
+      .safety-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 28px; }
+      .safety-grid p { margin-bottom: 0; color: #465e57; }
+      footer { margin-top: 36px; padding: 30px 0 44px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+      .footer-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+      @media (max-width: 860px) {
+        .hero, .walkthrough { grid-template-columns: 1fr; }
+        .tool-grid, .safety-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 620px) {
+        .shell { width: min(100% - 28px, 1120px); }
+        .nav { align-items: flex-start; padding: 16px 0; }
+        .nav-links { display: none; }
+        .hero { padding-top: 26px; }
+        .hero-copy { padding: 30px 24px; border-radius: 26px; }
+        .tool-grid, .safety-grid { grid-template-columns: 1fr; }
+        section { padding: 38px 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="shell nav">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">R</span>ReadMate AI</a>
+      <nav class="nav-links" aria-label="Page navigation">
+        <a href="#tools">Six tools</a>
+        <a href="#walkthrough">Judge walkthrough</a>
+        <a href="#safety">User control</a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="shell hero">
+        <section class="hero-copy">
+          <p class="eyebrow">OpenAI WebMCP Challenge · 2026</p>
+          <h1>Your reading library, ready to work with you.</h1>
+          <p class="lead">ReadMate AI gives ChatGPT six focused tools to search, save, listen, and study—while keeping every write and AI action visible to the user.</p>
+          <div class="actions">
+            <a class="button" href="/?challenge=1">Launch ReadMate</a>
+            <a class="button secondary" href="#walkthrough">Follow the judge walkthrough</a>
+          </div>
+        </section>
+
+        <aside class="demo-card" aria-label="Demo highlight">
+          <div>
+            <p class="eyebrow">Demo highlight</p>
+            <h2>Listen in Twi.</h2>
+            <p>Ask ChatGPT to find a saved article and prepare it for listening. Choose a Twi voice, then press Play yourself.</p>
+          </div>
+          <div class="language-list" aria-label="Supported local-language listening">
+            <div class="language"><strong>Asante Twi</strong><span>twi</span></div>
+            <div class="language"><strong>Akuapem Twi</strong><span>atw</span></div>
+            <div class="language"><strong>Ewe and Ga</strong><span>also supported</span></div>
+          </div>
+        </aside>
+      </div>
+
+      <section id="tools" class="shell">
+        <p class="eyebrow">One product · six bounded tools</p>
+        <h2>Useful enough for a real reading workflow.</h2>
+        <p class="section-intro">Read-only tools act immediately. Saving, subscribing, and generating study material open visible forms so the user reviews the details before anything changes.</p>
+        <div class="tool-grid">
+          <article class="tool"><code>readmate_search_library</code><h3>Search the library</h3><p>Find saved reading by title or metadata without exposing full document text.</p></article>
+          <article class="tool"><code>readmate_get_document_context</code><h3>Confirm the document</h3><p>Read compact metadata and learning availability for one owned item.</p></article>
+          <article class="tool"><code>readmate_prepare_listening</code><h3>Prepare listening</h3><p>Set up English, Twi, Ewe, or Ga playback. It never starts audio or spends speech quota.</p></article>
+          <article class="tool"><code>readmate_add_web_page</code><h3>Save a webpage</h3><p>Fill a review form for one public HTTPS page; the user makes the final submission.</p></article>
+          <article class="tool"><code>readmate_subscribe_rss</code><h3>Subscribe to a feed</h3><p>Prepare a public RSS or Atom subscription while keeping the change visible.</p></article>
+          <article class="tool"><code>readmate_generate_study_pack</code><h3>Generate a study pack</h3><p>Prepare summaries, flashcards, or quizzes only after the user confirms the paid AI action.</p></article>
+        </div>
+      </section>
+
+      <section id="walkthrough" class="shell walkthrough">
+        <div>
+          <p class="eyebrow">Judge walkthrough</p>
+          <h2>See the full loop in about a minute.</h2>
+          <p class="section-intro">Open this page inside a supported ChatGPT in-app browser or Chrome WebMCP build, then launch ReadMate in the same tab.</p>
+        </div>
+        <div class="steps">
+          <div class="step"><strong>Sign in and open Library.</strong><span>Use the supplied judge account and keep the ReadMate page active.</span></div>
+          <div class="step"><strong>Ask: “Find my article about Ghana.”</strong><span>ChatGPT searches, then confirms the matching document context.</span></div>
+          <div class="step"><strong>Ask: “Prepare it for listening in Twi.”</strong><span>ReadMate updates the visible player, but waits for you to press Play.</span></div>
+          <div class="step"><strong>Try a webpage write.</strong><span>Ask to save this public challenge page and review the form before submitting.</span></div>
+          <div class="step"><strong>Subscribe to a feed.</strong><span>Ask to subscribe to the <a href="/challenge-feed.xml">first-party challenge feed</a> and review the form.</span></div>
+          <div class="step"><strong>Create study material.</strong><span>Generate a study pack only after reviewing the quota-consuming action.</span></div>
+        </div>
+      </section>
+
+      <section id="safety" class="shell">
+        <div class="safety">
+          <p class="eyebrow">Designed around user control</p>
+          <h2>The agent assists. The reader decides.</h2>
+          <div class="safety-grid">
+            <div><h3>Scoped access</h3><p>Tools are available only on approved ReadMate routes for the signed-in owner.</p></div>
+            <div><h3>Visible changes</h3><p>Write and paid-AI tools populate forms instead of silently changing user data.</p></div>
+            <div><h3>No surprise playback</h3><p>Preparing Twi listening changes UI state only; pressing Play remains a human action.</p></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell footer-row">
+        <span>© 2026 ReadMate AI</span>
+        <span><a href="/about?section=privacy">Privacy</a> · <a href="https://openai.com/webmcp-challenge/">WebMCP Challenge</a></span>
+      </div>
+    </footer>
+  </body>
+</html>

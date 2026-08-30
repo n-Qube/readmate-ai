@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ReadMateAirPlayModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.readmateairplay.ReadMateAirPlayModule"]
+  }
+}

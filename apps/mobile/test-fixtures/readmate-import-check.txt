@@ -1,0 +1,3 @@
+ReadMate import verification
+
+This short document verifies that the mobile content picker accepts a standard text document and adds it to the shared reading library.

@@ -1,0 +1,346 @@
+import express from "express";
+import request from "supertest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DocumentRepository } from "./documents.js";
+import type { AuthedRequest } from "../auth.js";
+import { UploadQuotaError, uploadsRouter, type UploadRecordResponse, type UploadRepository, type UploadStorage } from "./uploads.js";
+import type { WorkLimiter } from "../workLimiter.js";
+
+function createTestApp(repository: UploadRepository, storage: UploadStorage, documentRepository?: DocumentRepository, documentWorkLimiter?: WorkLimiter) {
+  const app = express();
+  app.use(express.json());
+  app.use((req: AuthedRequest, _res, next) => {
+    req.userId = String(req.header("x-test-user") ?? "user_a");
+    next();
+  });
+  app.use("/api/uploads", uploadsRouter({
+    repository,
+    storage,
+    documentRepository,
+    documentWorkLimiter,
+    pdfTextExtractor: async (_bytes, filename) => [
+      {
+        orderIndex: 0,
+        blockType: "page",
+        text: `Page 1 readable text from ${filename}`,
+        sourcePageNumber: 1
+      }
+    ]
+  }));
+  return app;
+}
+
+function createMemoryRepository(): UploadRepository {
+  const uploads = new Map<string, UploadRecordResponse>();
+  let nextId = 1;
+
+  return {
+    async createUpload(userId, input, storageKey) {
+      const upload = {
+        id: `upload_${nextId++}`,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        byteSize: input.byteSize,
+        storageBucket: "readmate-uploads",
+        storageKey,
+        documentId: input.documentId,
+        createdAt: "2026-05-22T12:00:00.000Z",
+        userId
+      };
+      uploads.set(upload.id, upload);
+      return upload;
+    },
+    async getUpload(userId, uploadId) {
+      const upload = uploads.get(uploadId) as (UploadRecordResponse & { userId: string }) | undefined;
+      return upload?.userId === userId ? upload : null;
+    },
+    async attachDocument(userId, uploadId, documentId) {
+      const upload = uploads.get(uploadId) as (UploadRecordResponse & { userId: string }) | undefined;
+      if (!upload || upload.userId !== userId) return null;
+      const updated = { ...upload, documentId };
+      uploads.set(uploadId, updated);
+      return updated;
+    },
+    async deleteUpload(userId, uploadId) {
+      const upload = uploads.get(uploadId) as (UploadRecordResponse & { userId: string }) | undefined;
+      if (!upload || upload.userId !== userId) return false;
+      uploads.delete(uploadId);
+      return true;
+    }
+  };
+}
+
+function createMemoryStorage(fileBytes = Buffer.from("%PDF-1.7 readable bytes")): UploadStorage {
+  return {
+    async createSignedUploadUrl(storageKey) {
+      return { signedUrl: `https://storage.example/upload/${storageKey}`, token: "signed-upload-token" };
+    },
+    async createSignedDownloadUrl(storageKey) {
+      return { signedUrl: `https://storage.example/download/${storageKey}` };
+    },
+    async uploadFile() {
+      return undefined;
+    },
+    async deleteFile() {
+      return undefined;
+    },
+    async downloadFile() {
+      return fileBytes;
+    }
+  };
+}
+
+function createMemoryDocumentRepository(): DocumentRepository {
+  const documents = new Map<string, Awaited<ReturnType<DocumentRepository["createDocument"]>>>();
+  let nextId = 1;
+
+  return {
+    async createDocument(userId, input) {
+      const now = "2026-05-22T12:00:00.000Z";
+      const document = {
+        id: `doc_${nextId++}`,
+        userId,
+        title: input.title,
+        sourceType: input.sourceType,
+        sourceUrl: input.sourceUrl,
+        canonicalUrl: input.canonicalUrl,
+        rssFeedUrl: input.rssFeedUrl,
+        category: input.category,
+        sourceLabel: input.sourceLabel,
+        thumbnailUrl: input.thumbnailUrl,
+        coverImageUrl: input.coverImageUrl,
+        author: input.author,
+        description: input.description,
+        contentHtml: input.contentHtml,
+        topicTags: input.topicTags,
+        estimatedListeningSeconds: input.estimatedListeningSeconds,
+        pageCount: input.pageCount,
+        status: input.status ?? "unread",
+        summary: input.summary,
+        keyPoints: input.keyPoints,
+        quizQuestions: input.quizQuestions,
+        flashcards: input.flashcards,
+        createdAt: now,
+        updatedAt: now,
+        progress: input.progress,
+        provider: input.provider,
+        voice: input.voice,
+        speed: input.speed,
+        blocks: input.blocks.map((block, index) => ({
+          id: `block_${index}`,
+          orderIndex: block.orderIndex ?? index,
+          blockType: block.blockType,
+          text: block.text,
+          sourceSelector: block.sourceSelector,
+          sourcePageNumber: block.sourcePageNumber
+        }))
+      };
+      documents.set(document.id, document);
+      return document;
+    },
+    async listDocuments(userId) {
+      return [...documents.values()].filter((document) => document.userId === userId);
+    },
+    async getDocument(userId, documentId) {
+      const document = documents.get(documentId);
+      return document?.userId === userId ? document : null;
+    },
+    async updateProgress() {
+      return null;
+    },
+    async updateDocument() {
+      return null;
+    },
+    async clearDocumentHistory() {
+      return null;
+    },
+    async clearHistory() {
+      return 0;
+    },
+    async deleteDocument() {
+      return false;
+    },
+    async deleteCompletedDocuments() {
+      return 0;
+    }
+  };
+}
+
+describe("uploadsRouter", () => {
+  let repository: UploadRepository;
+  let storage: UploadStorage;
+
+  beforeEach(() => {
+    repository = createMemoryRepository();
+    storage = createMemoryStorage();
+  });
+
+  it("creates a signed PDF upload URL scoped to the authenticated user", async () => {
+    const app = createTestApp(repository, storage);
+
+    const response = await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "user_123")
+      .send({ filename: "Research Paper.pdf", mimeType: "application/pdf", byteSize: 2048 })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      id: "upload_1",
+      filename: "Research Paper.pdf",
+      mimeType: "application/pdf",
+      byteSize: 2048,
+      storageBucket: "readmate-uploads",
+      token: "signed-upload-token",
+      expiresInSeconds: 7200
+    });
+    expect(response.body.storageKey).toMatch(/^user_123\/.+-Research-Paper\.pdf$/);
+    expect(response.body.signedUrl).toContain(response.body.storageKey);
+  });
+
+  it("returns a stable 429 response when the durable upload quota is exhausted", async () => {
+    const repository = createMemoryRepository();
+    repository.createUpload = async () => {
+      throw new UploadQuotaError();
+    };
+
+    const storage = createMemoryStorage();
+    storage.createSignedUploadUrl = vi.fn(storage.createSignedUploadUrl);
+    const response = await request(createTestApp(repository, storage))
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "user_a")
+      .send({ filename: "research.pdf", mimeType: "application/pdf", byteSize: 2048 })
+      .expect(429);
+
+    expect(response.body).toEqual({ error: "Upload quota reached.", code: "UPLOAD_QUOTA_REACHED" });
+    expect(storage.createSignedUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("removes reserved upload metadata when URL signing fails", async () => {
+    const deleteUpload = vi.spyOn(repository, "deleteUpload");
+    storage.createSignedUploadUrl = async () => {
+      throw new Error("signing unavailable");
+    };
+
+    await request(createTestApp(repository, storage))
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "research.pdf", mimeType: "application/pdf", byteSize: 2048 })
+      .expect(500);
+
+    expect(deleteUpload).toHaveBeenCalledWith("owner", "upload_1");
+    expect(await repository.getUpload("owner", "upload_1")).toBeNull();
+  });
+
+  it("rejects non-PDF uploads", async () => {
+    const app = createTestApp(repository, storage);
+
+    await request(app)
+      .post("/api/uploads/pdf/sign")
+      .send({ filename: "notes.txt", mimeType: "text/plain", byteSize: 100 })
+      .expect(400);
+  });
+
+  it("creates download URLs only for the owner", async () => {
+    const app = createTestApp(repository, storage);
+
+    const created = await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "paper.pdf", mimeType: "application/pdf", byteSize: 1024 })
+      .expect(201);
+
+    await request(app).get(`/api/uploads/${created.body.id}/download-url`).set("x-test-user", "other").expect(404);
+
+    const response = await request(app).get(`/api/uploads/${created.body.id}/download-url`).set("x-test-user", "owner").expect(200);
+    expect(response.body).toMatchObject({ expiresInSeconds: 300 });
+    expect(response.body.signedUrl).toContain(created.body.storageKey);
+  });
+
+  it("creates a readable PDF document from an uploaded file", async () => {
+    const documentRepository = createMemoryDocumentRepository();
+    const app = createTestApp(repository, storage, documentRepository);
+    const created = await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "lecture-notes.pdf", mimeType: "application/pdf", byteSize: 1024 })
+      .expect(201);
+
+    const response = await request(app)
+      .post(`/api/uploads/${created.body.id}/pdf/document`)
+      .set("x-test-user", "owner")
+      .send({
+        title: "Lecture notes",
+        provider: "google",
+        voice: "en-US-Neural2-J",
+        speed: 1.1
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      id: "doc_1",
+      title: "Lecture notes",
+      sourceType: "pdf",
+      category: "Documents",
+      sourceLabel: "PDF upload",
+      provider: "google",
+      voice: "en-US-Neural2-J",
+      speed: 1.1,
+      progress: { blockIndex: 0, characterOffset: 0, sentenceIndex: 0, percent: 0 }
+    });
+    expect(response.body.blocks).toEqual([
+      expect.objectContaining({
+        orderIndex: 0,
+        blockType: "page",
+        text: "Page 1 readable text from lecture-notes.pdf",
+        sourcePageNumber: 1
+      })
+    ]);
+
+    const upload = await repository.getUpload("owner", created.body.id);
+    expect(upload?.documentId).toBe("doc_1");
+  });
+
+  it("rejects PDF extraction when document-processing capacity is exhausted", async () => {
+    const documentRepository = createMemoryDocumentRepository();
+    const app = createTestApp(repository, storage, documentRepository, { tryAcquire: () => null });
+    const created = await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "lecture-notes.pdf", mimeType: "application/pdf", byteSize: 1024 })
+      .expect(201);
+
+    const response = await request(app)
+      .post(`/api/uploads/${created.body.id}/pdf/document`)
+      .set("x-test-user", "owner")
+      .send({ provider: "google", voice: "en-US-Neural2-J", speed: 1 })
+      .expect(503);
+
+    expect(response.headers["retry-after"]).toBe("5");
+    expect(response.body.error).toContain("processing is busy");
+  });
+
+  it("rejects stored bytes that are not PDF content", async () => {
+    const documentRepository = createMemoryDocumentRepository();
+    const app = createTestApp(repository, createMemoryStorage(Buffer.from("not a pdf")), documentRepository);
+    const created = await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "notes.pdf", mimeType: "application/pdf", byteSize: 1024 })
+      .expect(201);
+
+    await request(app)
+      .post(`/api/uploads/${created.body.id}/pdf/document`)
+      .set("x-test-user", "owner")
+      .send({ title: "Notes", provider: "google", voice: "en-US-Neural2-J", speed: 1 })
+      .expect(400);
+  });
+
+  it("rejects signed upload metadata that is not a PDF", async () => {
+    const app = createTestApp(repository, storage);
+    await request(app)
+      .post("/api/uploads/pdf/sign")
+      .set("x-test-user", "owner")
+      .send({ filename: "notes.txt", mimeType: "text/plain", byteSize: 100 })
+      .expect(400);
+  });
+});
