@@ -1,8 +1,8 @@
 import { useAuth } from "@clerk/expo";
 import { useQuery } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
-import { Link, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ActionButton, EditorialHero, MetricLine, NavBackButton, QuietRule, Screen, SectionCard, SectionHeading, SettingsShortcut, colors, radius } from "@/components/mobile-design";
 import { SourceForm } from "@/components/source-form";
@@ -10,6 +10,7 @@ import { defaultSettings, useReadingLibrary } from "@/hooks/use-reading-library"
 import { sourceFromQuery, suggestSources, topicCategories, type SourceSuggestion } from "@/utils/source-suggestions";
 import { documentTitleFromFilename, normalizeUploadFilename } from "@/utils/upload-filename";
 import { getEntitlements } from "@/api/documents";
+import { extractSharedUrl } from "@/share/shared-url";
 
 // This is a root-stack route so it can be opened from Home without exposing a tab.
 export default function SourcesScreen() {
@@ -24,6 +25,17 @@ export default function SourcesScreen() {
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ sourceName: "", websiteUrl: "", rssFeedUrl: "" });
   const suggestions = useMemo(() => suggestSources(query), [query]);
+  const { sharedUrl } = useLocalSearchParams<{ sharedUrl?: string }>();
+
+  // A link shared from another app arrives pre-filled; the user still taps Add to save it.
+  useEffect(() => {
+    const url = typeof sharedUrl === "string" ? extractSharedUrl({ webUrl: sharedUrl }) : null;
+    if (!url) return;
+    setQuery(url);
+    setSelectedSuggestion(sourceFromQuery(url));
+    setFormError(null);
+    setFormNotice("Shared link ready. Review it, then tap Add to save it to your library.");
+  }, [sharedUrl]);
   const entitlementQuery = useQuery({
     queryKey: ["entitlements"],
     queryFn: async () => getEntitlements(await getToken()),
