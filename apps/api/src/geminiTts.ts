@@ -16,10 +16,11 @@ const MODEL_ENV_BY_PROVIDER: Readonly<Record<GeminiTtsProvider, string>> = {
   "gemini-lite": "GEMINI_TTS_LITE_MODEL"
 };
 
-// Short requests keep first-audio latency low and stay well inside the
-// model's per-request generation length; sections are synthesized in parallel.
-const GEMINI_TTS_CHUNK_BYTES = 2_500;
-const GEMINI_TTS_CONCURRENCY = 3;
+// Generation time grows with section length, so shorter sections synthesized
+// in parallel return audio sooner. Measured live on 2026-09-23 for ~1.9k
+// characters: 2500 B x3 took 35 s, 1200 B x4 took 22 s, 800 B x4 took 16 s.
+const DEFAULT_GEMINI_TTS_CHUNK_BYTES = 800;
+const DEFAULT_GEMINI_TTS_CONCURRENCY = 4;
 const GEMINI_TTS_DEFAULT_TIMEOUT_MS = 45_000;
 const GEMINI_TTS_MAX_ATTEMPTS = 2;
 const GEMINI_TTS_RETRY_BASE_MS = 400;
@@ -50,7 +51,7 @@ export async function synthesizeGeminiSpeech(input: GeminiSpeechInput, deps: Gem
   if (!apiKey) {
     throw new SpeechDependencyError("Gemini Text-to-Speech is not configured.", "gemini_tts", undefined, 0, false, false);
   }
-  const sections = splitTextForSpeech(input.text, GEMINI_TTS_CHUNK_BYTES);
+  const sections = splitTextForSpeech(input.text, boundedEnvInteger("GEMINI_TTS_CHUNK_BYTES", DEFAULT_GEMINI_TTS_CHUNK_BYTES, 300, 4_000));
   if (!sections.length) throw new SpeechDependencyError("No speakable text was provided.", "gemini_tts", 400, 0, false, false);
 
   const request = {
@@ -58,7 +59,7 @@ export async function synthesizeGeminiSpeech(input: GeminiSpeechInput, deps: Gem
     voice: isGeminiTtsVoice(input.voice) ? input.voice : DEFAULT_VOICE_BY_PROVIDER[input.provider],
     style: readingStyle(input.instructions, input.speed)
   };
-  const parts = await mapWithConcurrency(sections, GEMINI_TTS_CONCURRENCY, (text) =>
+  const parts = await mapWithConcurrency(sections, boundedEnvInteger("GEMINI_TTS_CONCURRENCY", DEFAULT_GEMINI_TTS_CONCURRENCY, 1, 8), (text) =>
     synthesizeSection({ ...request, text }, apiKey, deps)
   );
   return parts.length === 1 ? parts[0] : mergeWavAudioParts(parts, GEMINI_TTS_SECTION_PAUSE_MS);
@@ -240,6 +241,11 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, task: (item: 
   });
   await Promise.all(workers);
   return results;
+}
+
+function boundedEnvInteger(name: string, fallback: number, min: number, max: number): number {
+  const configured = Number(process.env[name]);
+  return Number.isInteger(configured) && configured >= min && configured <= max ? configured : fallback;
 }
 
 function geminiTimeoutMs(): number {

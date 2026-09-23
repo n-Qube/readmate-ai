@@ -15,6 +15,14 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 3. **Local Node is 20.19.6 but `package.json` requires Node 22.13 or later.** `.nvmrc` now pins 22, so run `nvm use` in the repo. Homebrew `node@22` (22.22.0) is installed. Put it first on `PATH` or pin it with `.nvmrc`.
 4. **The external gates from 2026-08-24 are still unevidenced.** These are credential rotation, migrations applied by the migration role, Secret Manager, Clerk production configuration, the EAS production environment and new binaries, a backup restore drill, monitoring, and budget alerts. See the section below. None of them can be verified from the repository.
 
+### Live Gemini verification (2026-09-23, using production's Gemini key, no production changes)
+
+- **Interactions API response shape confirmed.** Audio arrives as `steps[].content[]` blocks `{type: "audio", mime_type: "audio/wav", data}`; `output_audio` is an SDK convenience only. The client parses the real response.
+- **TTS works on both tiers.** `gemini-3.8-flash-lite-tts` and `gemini-3.8-flash-tts` each returned a valid 24 kHz WAV in about 4 s for a short sentence. Long text was chunked and merged correctly.
+- **The study-pack diagnosis is confirmed.** On `gemini-2.5-flash`, a 24-card, 12-question pack took **19.4 s**, past the old 15 s timeout. With the fix it returns 24 cards, 12 questions across all four question types, and 12 key points. Focused flashcard and quiz generation takes about 3 s.
+- **Long-text latency.** For about 1.9k characters, the wait fell from 35.4 s (2,500-byte sections, 3 in parallel) to **16.0 s** (800-byte sections, 4 in parallel). Those are now the defaults (`GEMINI_TTS_CHUNK_BYTES`, `GEMINI_TTS_CONCURRENCY`). Still open: stream the first section, or have the apps request smaller segments when a Gemini voice is selected, to bring first audio under about 5 s.
+- **The Cartesia key was revoked by the owner on 2026-09-23.** Until the new API revision is promoted, Premium users who still have Cartesia selected get TTS errors on the live revision. Delete the `readmate-cartesia-api-key` secret only **after** promotion, because the live revision mounts it at startup.
+
 ### P0 for the Gemini TTS release (added 2026-09-23)
 
 - **Live smoke test.** Google's documentation gives two different response shapes for the Interactions API (`output_audio.data` versus `{type:"audio"}` blocks in `steps`). The client accepts both, plus legacy `inlineData`. Only unit tests cover this path so far. After deploying a candidate, run this once for each provider:

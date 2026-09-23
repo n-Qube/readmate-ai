@@ -70,7 +70,7 @@ describe("synthesizeGeminiSpeech", () => {
     const sentences = Array.from({ length: 120 }, (_, index) => `Sentence number ${index} explains the research finding clearly.`);
     const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const text = JSON.parse(String(init?.body)).input[0].content[0].text as string;
-      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(2_500);
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(800);
       return audioResponse(wav(text.startsWith("Sentence number 0 ") ? 7 : 9));
     });
     const audio = await synthesizeGeminiSpeech({ provider: "gemini", text: sentences.join(" "), voice: "Kore", speed: 1 }, { apiKey: "key", fetcher });
