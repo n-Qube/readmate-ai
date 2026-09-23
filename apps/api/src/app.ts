@@ -2,8 +2,8 @@ import { clerkMiddleware } from "@clerk/express";
 import cors from "cors";
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
 import { requireClerkUser } from "./auth.js";
+import { perUserRateLimit, RATE_LIMITS } from "./rateLimits.js";
 import { createCorsOptions } from "./corsPolicy.js";
 import { refreshDueRssFeeds } from "./jobs/refreshRssFeeds.js";
 import { accountRouter } from "./routes/account.js";
@@ -30,15 +30,38 @@ import {
   isAccountDeletionFencedError
 } from "./webmcp/accountDeletionFence.js";
 
+/**
+ * The API serves JSON, audio, and two static HTML pages with inline styles, so
+ * the policy can deny everything else, including framing.
+ */
+function securityHeaders(_req: Request, res: Response, next: NextFunction): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  );
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+}
+
 export function createApp() {
   assertProductionConfig();
   const app = express();
+  // Cloud Run fronts the service with exactly one Google proxy hop. Trusting it
+  // makes req.ip the real client address for rate limiting.
+  if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
   const clerkConfigured = Boolean(process.env.CLERK_SECRET_KEY && process.env.CLERK_PUBLISHABLE_KEY);
   const allowAnonymousTts = process.env.ALLOW_ANONYMOUS_TTS === "true";
   if (process.env.NODE_ENV === "production" && allowAnonymousTts) {
     throw new Error("ALLOW_ANONYMOUS_TTS cannot be enabled in production because paid usage must be attributable.");
   }
 
+  app.disable("x-powered-by");
+  app.use(securityHeaders);
   app.use(cors(createCorsOptions()));
   app.use(express.json({ limit: "1mb" }));
 
@@ -143,6 +166,7 @@ export function createApp() {
 
   app.use(
     "/api/account",
+    perUserRateLimit(RATE_LIMITS.account),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for account deletion." })]),
@@ -150,13 +174,7 @@ export function createApp() {
   );
   app.use(
     "/api/tts",
-    rateLimit({
-      windowMs: 60_000,
-      limit: 10,
-      standardHeaders: true,
-      legacyHeaders: false,
-      keyGenerator: (req) => (req as { auth?: { userId?: string } }).auth?.userId ?? req.ip ?? "anonymous"
-    }),
+    perUserRateLimit(RATE_LIMITS.tts),
     ...(allowAnonymousTts
       ? []
       : clerkConfigured
@@ -172,6 +190,7 @@ export function createApp() {
   );
   app.use(
     "/api/history",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for synced history." })]),
@@ -179,6 +198,7 @@ export function createApp() {
   );
   app.use(
     "/api/documents",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for document sync." })]),
@@ -186,6 +206,7 @@ export function createApp() {
   );
   app.use(
     "/api/library",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for library sync." })]),
@@ -193,6 +214,7 @@ export function createApp() {
   );
   app.use(
     "/library",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for library sync." })]),
@@ -200,6 +222,7 @@ export function createApp() {
   );
   app.use(
     "/api/content",
+    perUserRateLimit(RATE_LIMITS.contentIngestion),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for content sync." })]),
@@ -207,6 +230,7 @@ export function createApp() {
   );
   app.use(
     "/api/uploads",
+    perUserRateLimit(RATE_LIMITS.uploads),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for authenticated uploads." })]),
@@ -214,6 +238,7 @@ export function createApp() {
   );
   app.use(
     "/api/sources",
+    perUserRateLimit(RATE_LIMITS.sources),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for source sync." })]),
@@ -221,13 +246,7 @@ export function createApp() {
   );
   app.use(
     "/api/learning",
-    rateLimit({
-      windowMs: 60_000,
-      limit: 30,
-      standardHeaders: true,
-      legacyHeaders: false,
-      keyGenerator: (req) => (req as { auth?: { userId?: string } }).auth?.userId ?? req.ip ?? "anonymous"
-    }),
+    perUserRateLimit(RATE_LIMITS.learning),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for learning sync." })]),
@@ -235,6 +254,7 @@ export function createApp() {
   );
   app.use(
     "/api/notes",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for notes sync." })]),
@@ -242,6 +262,7 @@ export function createApp() {
   );
   app.use(
     "/api/highlights",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for highlights sync." })]),
@@ -249,6 +270,7 @@ export function createApp() {
   );
   app.use(
     "/api/settings",
+    perUserRateLimit(RATE_LIMITS.data),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for synced settings." })]),
@@ -256,13 +278,7 @@ export function createApp() {
   );
   app.use(
     "/api/entitlements",
-    rateLimit({
-      windowMs: 60_000,
-      limit: 30,
-      standardHeaders: true,
-      legacyHeaders: false,
-      keyGenerator: (req) => (req as { auth?: { userId?: string } }).auth?.userId ?? req.ip ?? "anonymous"
-    }),
+    perUserRateLimit(RATE_LIMITS.entitlements),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for account entitlements." })]),
@@ -270,13 +286,7 @@ export function createApp() {
   );
   app.use(
     "/api/webmcp",
-    rateLimit({
-      windowMs: 60_000,
-      limit: 120,
-      standardHeaders: true,
-      legacyHeaders: false,
-      keyGenerator: (req) => (req as { auth?: { userId?: string } }).auth?.userId ?? req.ip ?? "anonymous"
-    }),
+    perUserRateLimit(RATE_LIMITS.webmcp),
     ...(clerkConfigured
       ? requireClerkUser()
       : [(_req: Request, res: Response) => res.status(503).json({ error: "Clerk is not configured for WebMCP audit events." })]),

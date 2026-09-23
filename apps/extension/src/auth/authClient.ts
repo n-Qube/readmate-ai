@@ -5,17 +5,16 @@ export type AuthSession = {
   token: string | null;
 };
 
+// Older builds persisted a raw session token and profile here. Clerk now owns
+// the session, so these keys are only ever removed.
+const LEGACY_SESSION_KEYS = ["readmateSessionToken", "readmateUserName", "readmateAvatarUrl"] as const;
+
+/** Signed-out starting state; the Clerk bridge replaces it once it loads. */
 export async function getAuthSession(): Promise<AuthSession> {
-  const stored = await chrome.storage.local.get(["readmateSessionToken", "readmateUserName", "readmateAvatarUrl"]);
-  const token = typeof stored.readmateSessionToken === "string" ? stored.readmateSessionToken : null;
-  return {
-    isSignedIn: Boolean(token),
-    token,
-    userName: stored.readmateUserName ?? "Anonymous reader",
-    avatarUrl: stored.readmateAvatarUrl
-  };
+  await chrome.storage.local.remove([...LEGACY_SESSION_KEYS]);
+  return { isSignedIn: false, token: null, userName: "Anonymous reader" };
 }
 
 export async function signOut(): Promise<void> {
-  await chrome.storage.local.remove(["readmateSessionToken", "readmateUserName", "readmateAvatarUrl"]);
+  await chrome.storage.local.remove([...LEGACY_SESSION_KEYS]);
 }
