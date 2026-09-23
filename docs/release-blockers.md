@@ -45,7 +45,9 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Migration:** `20260923120000_retire_cartesia_tts` was applied. It was the only pending migration of 25.
 - **Signed-in production check:** settings, entitlements, summary views, a document write and read, text-free progress saves, Google TTS, Gemini Lite with Google fallback, the Premium gate, and cleanup all passed.
 - **Not yet verifiable:** study packs and Ask AI currently fall back because the free-tier `gemini-2.5-flash` quota (20 requests/day) is exhausted. Both passed on the candidate before the quota ran out.
-- **Cartesia secret:** the live revision no longer mounts `readmate-cartesia-api-key`, so it can now be deleted in Secret Manager.
+- **Follow-up promotion:** `readmate-api-build-2cba14e69cdde410` (image `sha256:6a683363…ea6551`) now has 100% of traffic. It is the same code with the retired Cartesia bindings removed (`--remove-secrets`).
+- **Rollback targets:** `readmate-api-build-cce38ba86f3627c7`, then `readmate-api-hist-5eab4ffdfbe06477`.
+- **Cartesia secret:** keep `readmate-cartesia-api-key` until rollback is no longer needed, because every older revision still mounts it and would fail to start without it. Its value is the key revoked on 2026-09-23, so keeping it is harmless.
 
 ### P0: the Gemini API key is on the Free Tier (found 2026-09-23)
 
