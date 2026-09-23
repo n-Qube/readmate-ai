@@ -22,7 +22,8 @@ const listDocumentsQuerySchema = z.object({
   q: z.string().trim().min(1).max(120).optional(),
   sourceType: z.enum(sourceTypes).optional(),
   status: z.enum(documentStatuses).optional(),
-  limit: z.coerce.number().int().min(1).max(10).optional()
+  limit: z.coerce.number().int().min(1).max(10).optional(),
+  view: z.enum(["full", "summary"]).optional()
 }).strict().superRefine((value, context) => {
   if (value.query && value.q) {
     context.addIssue({
@@ -144,6 +145,12 @@ export type DocumentListFilters = {
   sourceType?: (typeof sourceTypes)[number];
   status?: (typeof documentStatuses)[number];
   limit?: number;
+  /**
+   * `summary` omits reading blocks and stored HTML, which dominate payload
+   * size, and reports `blockCount` instead. Clients fetch one document in
+   * full before reading or playing it.
+   */
+  view?: "full" | "summary";
 };
 
 export type DocumentSearchFilters = {
@@ -222,6 +229,8 @@ export type ReadingDocumentResponse = {
   topicTags?: string[];
   estimatedListeningSeconds?: number;
   pageCount?: number;
+  /** Number of reading blocks; equals `blocks.length` unless blocks were omitted. */
+  blockCount?: number;
   status: (typeof documentStatuses)[number];
   summary?: string;
   keyPoints?: string[];
@@ -303,7 +312,8 @@ export function documentsRouter(deps: DocumentsRouterDeps = {}): Router {
       query: parsedQuery.data.query ?? parsedQuery.data.q,
       sourceType: parsedQuery.data.sourceType,
       status: parsedQuery.data.status,
-      limit: parsedQuery.data.limit
+      limit: parsedQuery.data.limit,
+      view: parsedQuery.data.view
     });
     res.json(documents);
   }));
@@ -407,7 +417,9 @@ export function documentsRouter(deps: DocumentsRouterDeps = {}): Router {
       res.status(404).json({ error: "Document not found." });
       return;
     }
-    res.json(document);
+    // Progress is saved many times per listen; clients that already hold the
+    // text can ask for the small response.
+    res.json(req.query.view === "summary" ? summaryDocument(document) : document);
   }));
 
   router.patch("/:id", asyncHandler(async (req: AuthedRequest, res: Response) => {
@@ -576,7 +588,9 @@ export class PrismaDocumentRepository implements DocumentRepository {
       },
       orderBy: [{ lastReadAt: "desc" }, { updatedAt: "desc" }],
       take: filters.limit ?? 100,
-      include: documentInclude
+      ...(filters.view === "summary"
+        ? { include: { _count: { select: { blocks: true } } }, omit: { contentHtml: true } }
+        : { include: documentInclude })
     });
     return documents.map(serializeDocument);
   }
@@ -871,6 +885,11 @@ const documentInclude = {
   }
 };
 
+/** Drop reading blocks and stored HTML, reporting how many blocks exist. */
+export function summaryDocument(document: ReadingDocumentResponse): ReadingDocumentResponse {
+  return { ...document, contentHtml: undefined, blockCount: document.blockCount ?? document.blocks.length, blocks: [] };
+}
+
 async function getPrisma(): Promise<typeof PrismaSingleton> {
   const module = await import("../prisma.js");
   return module.prisma;
@@ -924,6 +943,7 @@ function serializeDocument(document: any): ReadingDocumentResponse {
     provider: "google",
     voice: normalizeGoogleTtsVoice(document.voice),
     speed: document.speed,
+    blockCount: document._count?.blocks ?? document.blocks?.length ?? 0,
     blocks: (document.blocks ?? []).map((block: any) => ({
       id: block.id,
       orderIndex: block.orderIndex,

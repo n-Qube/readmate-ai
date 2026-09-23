@@ -6,7 +6,7 @@ import { speechCacheFileKey } from "@/utils/speech-cache-key";
 import { normalizeUploadedDocumentForDisplay } from "@/utils/upload-filename";
 
 export async function getDocuments(token: string | null): Promise<ReadingDocument[]> {
-  const documents = screenshotMode ? mockDocuments : await fetchJson<ReadingDocument[]>("/api/documents", token);
+  const documents = screenshotMode ? mockDocuments : await fetchJson<ReadingDocument[]>("/api/documents?view=summary", token);
   return documents.map(normalizeUploadedDocumentForDisplay);
 }
 
@@ -26,7 +26,8 @@ export function updateDocumentProgress(
     const document = mockDocuments.find((item) => item.id === documentId) ?? mockDocuments[0];
     return Promise.resolve({ ...document, progress });
   }
-  return fetchJson<ReadingDocument>(`/api/documents/${encodeURIComponent(documentId)}/progress`, token, {
+  // The caller already holds the text; ask for the small response (no blocks).
+  return fetchJson<ReadingDocument>(`/api/documents/${encodeURIComponent(documentId)}/progress?view=summary`, token, {
     method: "PATCH",
     body: JSON.stringify({ progress })
   });

@@ -33,6 +33,8 @@ export type ReadingDocument = {
   voice: string;
   speed: number;
   blocks: ReadingBlock[];
+  /** Present on summary list items, whose `blocks` are omitted until fetched in full. */
+  blockCount?: number;
 };
 
 export type ReadingBlock = {

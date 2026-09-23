@@ -21,6 +21,7 @@ import type { CreateDocumentInput, SaveUrlInput, UpdateDocumentInput } from "@/a
 import type { ReadingDocument, SourceSubscription, UserSettings } from "@/types";
 import { balanceFeedDocuments, dedupeDocuments, prependDocument } from "@/utils/document-list";
 import { screenshotMode } from "@/utils/screenshot-mode";
+import { withKnownBlocks } from "../utils/document-blocks";
 
 export function useReadingLibrary() {
   const { isSignedIn, getToken } = useAuth();
@@ -169,8 +170,10 @@ export function useReadingLibrary() {
   });
 
   async function markProgress(document: ReadingDocument, progress: ReadingDocument["progress"]) {
-    const updated = await updateDocumentProgress(document.id, await getToken(), progress);
-    queryClient.setQueryData(["document", document.id], updated);
+    const response = await updateDocumentProgress(document.id, await getToken(), progress);
+    const updated = withKnownBlocks(response, queryClient.getQueryData<ReadingDocument>(["document", document.id]) ?? document);
+    // The per-document cache must always hold the full text.
+    if (updated.blocks.length) queryClient.setQueryData(["document", document.id], updated);
     queryClient.setQueryData<ReadingDocument[]>(["documents"], (current) =>
       current?.map((item) => (item.id === updated.id ? updated : item))
     );

@@ -1,4 +1,6 @@
 import * as Haptics from "expo-haptics";
+import { documentBlockCount } from "@/utils/document-blocks";
+import { estimateListeningSeconds } from "@/components/content-card";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Alert, Platform, Pressable, Text, View, type TextStyle } from "react-native";
@@ -60,9 +62,9 @@ export function PlaybackBar({
   const previousDocument = queueIndex > 0 ? queue[queueIndex - 1] : undefined;
   const nextDocument = queueIndex >= 0 && queueIndex < queue.length - 1 ? queue[queueIndex + 1] : undefined;
   const activeBlockIndex = isActiveDocument ? playback.activeBlockIndex : normalizedBlockIndex(document);
-  const blockCount = activeDocument?.blocks.length ?? 0;
+  const blockCount = documentBlockCount(activeDocument);
   const playbackBlocked = playbackDisabled || settingsSaving;
-  const canPlay = Boolean(activeDocument?.blocks.length) && !playbackBlocked;
+  const canPlay = blockCount > 0 && !playbackBlocked;
   const currentState = isActiveDocument ? playback.state : "ready";
   const percent = isActiveDocument ? playback.percent : document?.progress.percent ?? playback.percent;
   const totalDuration = isActiveDocument ? playback.duration : estimateDuration(activeDocument);
@@ -513,10 +515,7 @@ function formatDuration(seconds: number): string {
 }
 
 function estimateDuration(document?: ReadingDocument): number {
-  if (!document) return 0;
-  if (document.estimatedListeningSeconds) return document.estimatedListeningSeconds;
-  const words = document.blocks.reduce((sum, block) => sum + block.text.trim().split(/\s+/).filter(Boolean).length, 0);
-  return Math.max(30, Math.round((words / 160) * 60 / Math.max(0.5, document.speed)));
+  return document ? estimateListeningSeconds(document) : 0;
 }
 
 function shortSectionTitle(value: string): string {

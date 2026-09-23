@@ -4,7 +4,8 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatu
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
 import { Platform } from "react-native";
 import { ApiError } from "@/api/client";
-import { createSpeechAudioFile, createSpeechCastUrl, getUserSettings, updateDocumentProgress } from "@/api/documents";
+import { createSpeechAudioFile, createSpeechCastUrl, getDocument, getUserSettings, updateDocumentProgress } from "@/api/documents";
+import { needsFullDocument, withKnownBlocks } from "@/utils/document-blocks";
 import { addOutputStateListener, loadOutputMedia, sendOutputCommand, showOutputPicker as presentOutputPicker, type OutputMedia, type OutputState } from "@/native/output";
 import { AI_AUDIO_DISCLOSURE_TITLE, aiAudioMetadataSubtitle } from "@/playback/ai-audio-disclosure";
 import { endPlaybackLiveActivity, updatePlaybackLiveActivity } from "@/playback/live-activity";
@@ -210,8 +211,42 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  async function playDocument(document: ReadingDocument, blockIndex?: number) {
-    await stop({ saveProgress: activeDocumentRef.current?.id !== document.id });
+  /**
+   * Library lists carry a summary without reading blocks. Load the full
+   * document (shared with the document screen's query cache) before playback.
+   */
+  async function loadFullDocument(document: ReadingDocument): Promise<ReadingDocument> {
+    const known = activeDocumentRef.current;
+    if (!needsFullDocument(document)) return document;
+    if (known?.id === document.id && known.blocks.length) return withKnownBlocks(document, known);
+    return queryClient.fetchQuery({
+      queryKey: ["document", document.id],
+      queryFn: async () => getDocument(document.id, await getToken()),
+      staleTime: 30_000
+    });
+  }
+
+  async function playDocument(requested: ReadingDocument, blockIndex?: number) {
+    await stop({ saveProgress: activeDocumentRef.current?.id !== requested.id });
+    let document = requested;
+    if (needsFullDocument(requested)) {
+      const runId = runIdRef.current;
+      activeDocumentRef.current = withKnownBlocks(requested, activeDocumentRef.current);
+      setActiveDocument(activeDocumentRef.current);
+      setState("loading");
+      setError(null);
+      try {
+        document = await loadFullDocument(requested);
+      } catch (caught) {
+        if (runId !== runIdRef.current) return;
+        setError(playbackErrorMessage(caught));
+        setState("ready");
+        return;
+      }
+      // Another document was chosen while this one was loading.
+      if (runId !== runIdRef.current) return;
+    }
+    activeDocumentRef.current = document;
     setActiveDocument(document);
     const resumeFromSavedPosition = blockIndex === undefined;
     const safeIndex = clamp(blockIndex ?? normalizedBlockIndex(document), 0, Math.max(0, document.blocks.length - 1));
@@ -227,9 +262,12 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     if (segment) await playSegment(document, segment, "loading");
   }
 
-  function selectDocument(document: ReadingDocument, options: { resetPlayback?: boolean } = {}) {
+  function selectDocument(selected: ReadingDocument, options: { resetPlayback?: boolean } = {}) {
     const currentDocument = activeDocumentRef.current;
+    // A summary list item must never replace text that is already loaded.
+    const document = withKnownBlocks(selected, currentDocument);
     const sameDocument = currentDocument?.id === document.id;
+    if (needsFullDocument(document)) void hydrateSelectedDocument(document, options);
     if (sameDocument && !options.resetPlayback) {
       activeDocumentRef.current = document;
       setActiveDocument(document);
@@ -247,12 +285,29 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     prefetchedSegmentRef.current = null;
     activeDocumentRef.current = document;
     setActiveDocument(document);
-    setProgressState(progressSnapshotForBlock(document, options.resetPlayback ? 0 : normalizedBlockIndex(document)));
+    setProgressState(needsFullDocument(document) && !options.resetPlayback
+      ? document.progress
+      : progressSnapshotForBlock(document, options.resetPlayback ? 0 : normalizedBlockIndex(document)));
     setCurrentTime(0);
     setDuration(0);
     setError(null);
     setState("ready");
     endPlaybackLiveActivity();
+  }
+
+  async function hydrateSelectedDocument(document: ReadingDocument, options: { resetPlayback?: boolean }) {
+    try {
+      const full = await loadFullDocument(document);
+      const current = activeDocumentRef.current;
+      if (current?.id !== full.id || !needsFullDocument(current)) return;
+      activeDocumentRef.current = full;
+      setActiveDocument(full);
+      if (state === "ready" || state === "idle") {
+        setProgressState(progressSnapshotForBlock(full, options.resetPlayback ? 0 : normalizedBlockIndex(full)));
+      }
+    } catch {
+      // Play retries the fetch and reports a failure to the listener.
+    }
   }
 
   async function toggleDocument(document: ReadingDocument) {
@@ -548,8 +603,8 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     };
     setProgressState(safeProgress);
     try {
-      const updated = await updateDocumentProgress(document.id, await getToken(), safeProgress);
-      queryClient.setQueryData(["document", document.id], updated);
+      const updated = withKnownBlocks(await updateDocumentProgress(document.id, await getToken(), safeProgress), document);
+      if (updated.blocks.length) queryClient.setQueryData(["document", document.id], updated);
       queryClient.setQueryData<ReadingDocument[]>(["documents"], (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item))
       );
