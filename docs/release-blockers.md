@@ -1,6 +1,52 @@
 # ReadMate AI Release Blockers
 
-Last updated: 2026-08-24
+Last updated: 2026-09-23
+
+## 2026-09-23 production-readiness review
+
+Reviewed against `docs/readmate-revamp-prd.md` and `docs/ReadMate-WebMCP-Product-Requirements-and-Implementation-Plan.docx`. Status: **NO-GO** until the P0 items below are closed.
+
+Verified in a clean install outside iCloud with Node 22: `typecheck` passes for API, extension and mobile; 626 Vitest tests pass (API 311, extension 149, mobile 166) plus 22 Firebase hosting tests; `npm run build` passes; `npm run check:dependencies` passes; the Prisma schema validates.
+
+### P0: blocks any production release
+
+1. **Treat GitHub as the only source of truth.** `n-Qube/readmate-ai` holds the 2026-08-30 challenge release. The local working copy it was published from is not linked to that remote: its git history is unrelated, its last commit is from 2026-05-28, and it tracks only 15 files. Changes made since the release were applied through a pull request. From now on, work from a clone of `n-Qube/readmate-ai`, require a green CI run (`.github/workflows/ci.yml`) before merging, and deploy only from commits on `main`.
+2. **The working copy lives in iCloud Drive with storage optimization on.** About 152k of 164k `node_modules` files, most of `apps/mobile/ios` and `apps/mobile/android`, and the native AirPlay/Cast module source (`ReadMateAirPlayModule.swift`, `ReadMateAirPlayModule.kt`, podspec) are evicted to the cloud (`dataless`). Reads block for about 25 s per file, so local `typecheck`, `test` and native builds hang. iCloud also created conflict copies (`* 2.*`). One of them, `app/(tabs)/index 2.tsx`, was a live Expo Router route, and another duplicated the Swift module class. Eight stale copies in source directories were moved to `~/readmate-sync-conflicts-2026-09-23/`. Fix: move the repository out of `~/Documents` (for example to `~/Developer/readmate`), or mark the folder "Keep Downloaded". Then run `npm ci`.
+3. **Local Node is 20.19.6 but `package.json` requires Node 22.13 or later.** Homebrew `node@22` (22.22.0) is installed. Put it first on `PATH` or pin it with `.nvmrc`.
+4. **The external gates from 2026-08-24 are still unevidenced.** These are credential rotation, migrations applied by the migration role, Secret Manager, Clerk production configuration, the EAS production environment and new binaries, a backup restore drill, monitoring, and budget alerts. See the section below. None of them can be verified from the repository.
+
+### P0 for the Gemini TTS release (added 2026-09-23)
+
+- **Live smoke test.** Google's documentation gives two different response shapes for the Interactions API (`output_audio.data` versus `{type:"audio"}` blocks in `steps`). The client accepts both, plus legacy `inlineData`. Only unit tests cover this path so far. After deploying a candidate, run this once for each provider:
+
+  ```bash
+  curl -X POST https://<candidate>/api/tts -H 'Authorization: Bearer <clerk-session-token>' -H 'Content-Type: application/json' \
+    --data '{"text":"ReadMate Gemini smoke test.","provider":"gemini-lite","voice":"Kore","speed":1}' --output /tmp/gemini-lite.wav
+  ```
+
+  Repeat with `"provider":"gemini"` using a Premium account. Check latency, the `X-ReadMate-TTS-Provider` header, and that the WAV plays.
+- **Pricing and quota.** The documentation does not give GA status, pricing or rate limits for `gemini-3.8-flash-tts` or `gemini-3.8-flash-lite-tts`. Confirm them in the Google Cloud console. Then set `FREE_TTS_DAILY_CHAR_LIMIT` and `PREMIUM_TTS_DAILY_CHAR_LIMIT` to match, and add a billing budget alert on the Gemini API key. Flash-Lite is enabled on the Free plan.
+- **Apply migration `20260923120000_retire_cartesia_tts`.** It moves saved `cartesia` settings to `gemini`/`Kore`. The API also normalizes `cartesia` → `gemini` on every read and write, so the order of migration and deploy does not matter.
+- **Retire Cartesia infrastructure after the deploy.** Revoke the Cartesia API key, delete the `readmate-cartesia-api-key` Secret Manager entry, and confirm that the new Cloud Run revision no longer references `CARTESIA_*` values. The deploy scripts no longer set them.
+- **Test on real devices.** Gemini returns 24 kHz mono WAV, about 2.9 MB per minute. That is larger than Google MP3. Confirm iOS and Android playback, the lock screen, and Chromecast/AirPlay casting, and check mobile data use on long documents.
+
+### P1: product requirements gaps
+
+- **Share into ReadMate (mobile MVP).** Neither platform has an iOS share extension or an Android `SEND` intent. The PRD lists "Share URL into ReadMate" as a mobile MVP surface. Implementing it needs a config plugin and native builds.
+- **Learning model access.** Learning features default to `GEMINI_MODEL=gemini-2.5-flash`. There is no shutdown date, but Google now limits 2.5 access to projects that have used it before. A new GCP project or API key would lose access. Plan a move to a 3.x model, and re-validate the structured study output before switching.
+- **WebMCP production origin.** Chrome serves WebMCP behind an origin trial (Chrome 153+). Register the trial for the final `WEB_APP_ORIGIN` and deploy with `npm run deploy:firebase-hosting:guarded` so the `Origin-Trial` header is injected. Add the origin to the Clerk allowed origins and to the API `WEB_APP_ORIGIN`.
+- **Extension version.** Bump `apps/extension/package.json` and `public/manifest.json` from `0.1.5` together before packaging this change for the Chrome Web Store. `manifest.test.ts` requires the two versions to match.
+
+### Fixed in this review
+
+- **Gemini 3.8 Flash TTS and Flash-Lite TTS added** as providers `gemini` (Premium) and `gemini-lite` (all plans) through the existing `GEMINI_API_KEY`. The request uses `store: false`. Text is split into sentence-bounded sections, synthesized three at a time, retried on 408, 429 and 5xx, and merged into WAV. Upstream error bodies are never echoed back. The 30 prebuilt voices are available in the API, extension and WebMCP. Mobile shows eight curated reading voices.
+- **Cartesia removed** from the API, extension, mobile, deploy scripts and environment templates. Saved and legacy-client `cartesia` selections migrate to Gemini Flash. `GET /api/tts/voices` now returns the Gemini catalogue, so installed app builds keep working.
+- **Playback speed was applied twice.** Clients sent `speed` to the server, where Google baked it in with `speakingRate`, and then set `playbackRate` again, so 1.5× played at about 2.25×. Local playback now requests neutral-rate audio. Android Cast URLs keep speed baked in and play at rate 1.
+- **The dependency gate failed in CI.** `sharp` in the API runtime had libheif CVEs, and `@xmldom/xmldom`, `js-yaml` and `browserslist` in Expo tooling had high advisories. Fixed with in-major patch bumps and overrides.
+- **Extension TTS disclosure.** The privacy card now names the provider that receives text on Play, as the PRD privacy requirement asks.
+- **Extension voice Preview button.** It had no click handler and was covered by the overlay `<select>`. It now plays a short sample.
+- **Extension premium provider.** Free accounts see Gemini Flash as locked instead of failing at playback.
+- **WebMCP.** Added Chrome's `consequentialHint` annotation: true for the three write tools, false for the read and listening tools. The six PRD tools, declarative forms without `toolautosubmit`, `respondWith`, abort-signal registration, redacted output envelopes, audit and idempotency, and the 40-case evaluation set were already present and match Chrome's current API.
 
 ## 2026-08-24 production-readiness gate
 

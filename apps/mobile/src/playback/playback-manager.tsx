@@ -375,7 +375,9 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       const settings = playbackSettingsForDocument(document);
 
       const player = createAudioPlayer({ uri, name: document.title }, { updateInterval: 500 });
-      player.setPlaybackRate(settings.speed);
+      // A cast receiver plays the URL itself, so cast audio carries the speed
+      // from synthesis; local audio is neutral-rate and sped up here.
+      player.setPlaybackRate(useSecureCastUrl ? 1 : settings.speed);
       player.setActiveForLockScreen(
         true,
         {
@@ -493,13 +495,15 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     const token = await getToken();
     const settings = playbackSettingsForDocument(document);
     if (runId !== runIdRef.current) throw new Error("Playback request was superseded.");
+    // Local playback applies the listener's speed with setPlaybackRate, so the
+    // file is synthesized at a neutral rate and stays reusable across speeds.
     return createSpeechAudioFile(token, {
       userId: userId ?? "signed-out",
-      cacheKey: `${document.id}-${segment.cacheKey}-${settings.provider}-${settings.voice}-${settings.speed}-${settings.targetLanguage}`,
+      cacheKey: `${document.id}-${segment.cacheKey}-${settings.provider}-${settings.voice}-${settings.targetLanguage}`,
       text: segment.text,
       provider: settings.provider,
       voice: settings.voice,
-      speed: settings.speed,
+      speed: 1,
       targetLanguage: settings.targetLanguage
     });
   }

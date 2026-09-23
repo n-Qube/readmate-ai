@@ -39,7 +39,6 @@ REQUIRED_SECRETS=(
   readmate-supabase-service-role-key
   readmate-gemini-api-key
   readmate-khaya-api-key
-  readmate-cartesia-api-key
   readmate-cron-secret
   readmate-webmcp-audit-digest-key
 )

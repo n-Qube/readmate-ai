@@ -185,7 +185,16 @@ Avoid putting Clerk calls in content scripts. This project keeps auth in the sid
 
 ## Text-to-speech
 
-The extension and mobile app never call speech providers directly. They send text to the backend, which validates the Clerk session and applies rate limiting. English uses Google Cloud Text-to-Speech (or the configured Cartesia option); Twi, Ewe, and Ga use Khaya Text-to-Speech v2 after translation. The challenge candidate bundles the offline Nano-Twi ONNX model as a no-subscription Asante Twi fallback while the current Khaya call quota is exhausted.
+The extension and mobile app never call speech providers directly. They send text to the backend, which validates the Clerk session and applies rate limiting. English uses Google Cloud Text-to-Speech, Gemini 3.8 Flash-Lite TTS (all plans), or Gemini 3.8 Flash TTS (Premium); Twi, Ewe, and Ga use Khaya Text-to-Speech v2 after translation. The challenge candidate bundles the offline Nano-Twi ONNX model as a no-subscription Asante Twi fallback while the current Khaya call quota is exhausted.
+
+Gemini settings:
+
+- endpoint: `POST https://generativelanguage.googleapis.com/v1beta/interactions` (uses the existing `GEMINI_API_KEY`)
+- providers: `gemini` → `GEMINI_TTS_MODEL` (default `gemini-3.8-flash-tts`, Premium); `gemini-lite` → `GEMINI_TTS_LITE_MODEL` (default `gemini-3.8-flash-lite-tts`)
+- voices: the 30 Gemini prebuilt voices (default `Kore`); output is 24 kHz mono WAV
+- requests send `store: false`; long text is split into sentence-bounded sections and synthesized three at a time
+- Gemini has no numeric speaking rate, so clients request neutral-rate audio and apply playback speed locally; cast audio describes the pace in the style prompt
+- Cartesia was retired on 2026-09-23; saved `cartesia` selections migrate to `gemini`
 
 Google settings:
 

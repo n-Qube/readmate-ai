@@ -22,7 +22,7 @@ export function mergeWavAudioParts(parts: Buffer[], pauseMilliseconds = 180): Bu
       part.blockAlign !== reference.blockAlign ||
       part.bitsPerSample !== reference.bitsPerSample
     ) {
-      throw new Error("Khaya returned WAV sections with incompatible audio formats.");
+      throw new Error("Speech provider returned WAV sections with incompatible audio formats.");
     }
   }
 
@@ -79,8 +79,28 @@ export function encodePcm16MonoWav(samples: Float32Array, sampleRate: number): B
   return encodeWav(formatChunk, data);
 }
 
+/** Wrap headerless 16-bit little-endian PCM (for example `audio/l16`) in a WAV container. */
+export function wrapPcm16Wav(pcm: Buffer, sampleRate: number, channelCount = 1): Buffer {
+  if (!Number.isInteger(sampleRate) || sampleRate < 8_000 || sampleRate > 192_000) {
+    throw new Error("Speech provider returned an invalid sample rate.");
+  }
+  if (!Number.isInteger(channelCount) || channelCount < 1 || channelCount > 2) {
+    throw new Error("Speech provider returned an unsupported channel count.");
+  }
+  const blockAlign = channelCount * 2;
+  if (!pcm.length || pcm.length % blockAlign !== 0) throw new Error("Speech provider returned malformed PCM audio.");
+  const formatChunk = Buffer.alloc(16);
+  formatChunk.writeUInt16LE(1, 0);
+  formatChunk.writeUInt16LE(channelCount, 2);
+  formatChunk.writeUInt32LE(sampleRate, 4);
+  formatChunk.writeUInt32LE(sampleRate * blockAlign, 8);
+  formatChunk.writeUInt16LE(blockAlign, 12);
+  formatChunk.writeUInt16LE(16, 14);
+  return encodeWav(formatChunk, pcm);
+}
+
 function parseWav(buffer: Buffer): ParsedWav {
-  if (!isWavAudio(buffer)) throw new Error("Khaya did not return a valid WAV audio file.");
+  if (!isWavAudio(buffer)) throw new Error("Speech provider did not return a valid WAV audio file.");
   let offset = 12;
   let formatChunk: Buffer | undefined;
   let data: Buffer | undefined;
@@ -90,14 +110,14 @@ function parseWav(buffer: Buffer): ParsedWav {
     const size = buffer.readUInt32LE(offset + 4);
     const start = offset + 8;
     const end = start + size;
-    if (end > buffer.length) throw new Error("Khaya returned a truncated WAV audio file.");
+    if (end > buffer.length) throw new Error("Speech provider returned a truncated WAV audio file.");
     if (id === "fmt ") formatChunk = buffer.subarray(start, end);
     if (id === "data") data = buffer.subarray(start, end);
     offset = end + (size % 2);
   }
 
   if (!formatChunk || formatChunk.length < 16 || !data) {
-    throw new Error("Khaya returned an incomplete WAV audio file.");
+    throw new Error("Speech provider returned an incomplete WAV audio file.");
   }
   const audioFormat = formatChunk.readUInt16LE(0);
   if (audioFormat !== 1 && audioFormat !== 3) {
@@ -105,7 +125,7 @@ function parseWav(buffer: Buffer): ParsedWav {
   }
   const blockAlign = formatChunk.readUInt16LE(12);
   if (!blockAlign || data.length % blockAlign !== 0) {
-    throw new Error("Khaya returned malformed WAV sample data.");
+    throw new Error("Speech provider returned malformed WAV sample data.");
   }
 
   return {

@@ -38,7 +38,10 @@
   "overrides": {
     "metro": "0.84.5",
     "metro-config": "0.84.5",
-    "metro-transform-worker": "0.84.5"
+    "metro-transform-worker": "0.84.5",
+    "@xmldom/xmldom@~0.8.0": "0.8.15",
+    "js-yaml@^4.0.0": "4.3.2",
+    "browserslist": "^4.28.7"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.306",

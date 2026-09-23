@@ -220,17 +220,6 @@ export type TtsVoiceOption = {
   gender?: string;
 };
 
-export function getCartesiaVoices(token: string | null): Promise<TtsVoiceOption[]> {
-  if (screenshotMode) {
-    return Promise.resolve([
-      { id: "cartesia-default", name: "Natural default", description: "Your configured Cartesia voice." },
-      { id: "cartesia-warm", name: "Warm narrator", description: "A calm, conversational reading voice." },
-      { id: "cartesia-clear", name: "Clear guide", description: "A bright, focused reading voice." }
-    ]);
-  }
-  return fetchJson<{ voices: TtsVoiceOption[] }>("/api/tts/voices", token).then((response) => response.voices);
-}
-
 export function getNotes(token: string | null, documentId: string): Promise<ReadingNote[]> {
   if (screenshotMode) return Promise.resolve(mockNotes.filter((item) => item.documentId === documentId));
   return fetchJson<ReadingNote[]>(`/api/notes?documentId=${encodeURIComponent(documentId)}`, token);
@@ -381,7 +370,7 @@ export type CreateSpeechAudioFileInput = {
 };
 
 const speechFilePromises = new Map<string, Promise<string>>();
-const SPEECH_AUDIO_CACHE_VERSION = "v3-wav-merge";
+const SPEECH_AUDIO_CACHE_VERSION = "v4-neutral-rate";
 
 export async function createSpeechAudioFile(token: string | null, input: CreateSpeechAudioFileInput): Promise<string> {
   if (screenshotMode) throw new ApiError("Audio playback is disabled in screenshot mode.", 503);

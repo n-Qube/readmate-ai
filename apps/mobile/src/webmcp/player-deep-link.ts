@@ -1,4 +1,5 @@
 import { defaultVoiceForLanguage, voicesForLanguage } from "../config/local-voices";
+import { DEFAULT_VOICE_BY_PROVIDER, isGeminiProvider, isGeminiVoice } from "../config/tts-providers";
 import type { UserSettings } from "../types";
 
 export const playerTargetLanguages = ["en", "tw", "ee", "gaa"] as const;
@@ -63,7 +64,7 @@ export function voiceForPlayerLanguage(
 ): string {
   if (voiceSupportsLanguage(provider, currentVoice, targetLanguage)) return currentVoice;
   return targetLanguage === "en"
-    ? provider === "cartesia" ? "cartesia-default" : defaultEnglishVoice
+    ? DEFAULT_VOICE_BY_PROVIDER[provider] ?? defaultEnglishVoice
     : defaultVoiceForLanguage(targetLanguage);
 }
 
@@ -71,9 +72,7 @@ function voiceSupportsLanguage(provider: UserSettings["provider"], voice: string
   const normalized = voice.trim();
   if (!normalized) return false;
   if (targetLanguage === "en") {
-    return provider === "cartesia"
-      ? normalized === "cartesia-default" || (!googleEnglishVoices.has(normalized) && !normalized.startsWith("khaya:") && !normalized.startsWith("ghananlp-"))
-      : googleEnglishVoices.has(normalized);
+    return isGeminiProvider(provider) ? isGeminiVoice(normalized) : googleEnglishVoices.has(normalized);
   }
   if (targetLanguage === "tw" && ["ghananlp-asante-twi", "ghananlp-akuapem-twi"].includes(normalized)) {
     return true;

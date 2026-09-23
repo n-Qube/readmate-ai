@@ -103,7 +103,7 @@ describe("web WebMCP registration adapter", () => {
       "readmate_get_document_context",
       "readmate_prepare_listening"
     ]);
-    expect(browser.registered[0].tool.annotations).toEqual({ readOnlyHint: true, untrustedContentHint: true });
+    expect(browser.registered[0].tool.annotations).toEqual({ readOnlyHint: true, untrustedContentHint: true, consequentialHint: false });
     expect(browser.registered[0].signal).toBe(registration.signal);
   });
 

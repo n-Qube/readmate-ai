@@ -18,6 +18,8 @@ export type ReadMateToolContract = {
   readonly annotations: {
     readonly readOnlyHint: boolean;
     readonly untrustedContentHint: boolean;
+    /** Chrome WebMCP hint for actions that save data or spend AI quota. */
+    readonly consequentialHint: boolean;
   };
 };
 
@@ -30,7 +32,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Search the signed-in user's ReadMate library by title or metadata. Use it to identify saved items; do not use it to retrieve document text. Read-only.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_search_library,
-    annotations: { readOnlyHint: true, untrustedContentHint: true }
+    annotations: { readOnlyHint: true, untrustedContentHint: true, consequentialHint: false }
   },
   {
     name: "readmate_get_document_context",
@@ -40,7 +42,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Get compact metadata and learning availability for one owned document. Use it after search to confirm an item; do not use it for full text. Read-only.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_get_document_context,
-    annotations: { readOnlyHint: true, untrustedContentHint: true }
+    annotations: { readOnlyHint: true, untrustedContentHint: true, consequentialHint: false }
   },
   {
     name: "readmate_prepare_listening",
@@ -50,7 +52,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Prepare an owned document for listening in English, Twi, Ewe, or Ga. Use it after confirming the document; it changes visible player state but never starts speech or consumes speech quota. The user must press Play.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_prepare_listening,
-    annotations: { readOnlyHint: false, untrustedContentHint: true }
+    annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: false }
   },
   {
     name: "readmate_add_web_page",
@@ -60,7 +62,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Fill a visible review form to save one public HTTPS webpage to the signed-in ReadMate library. Do not use it for files, private-network URLs, or deletion. Data changes only after the user submits the form.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_add_web_page,
-    annotations: { readOnlyHint: false, untrustedContentHint: true }
+    annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: true }
   },
   {
     name: "readmate_subscribe_rss",
@@ -70,7 +72,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Fill a visible review form to create or reactivate one public HTTPS RSS or Atom subscription. Do not use it to remove sources. Data changes only after the user submits the form.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_subscribe_rss,
-    annotations: { readOnlyHint: false, untrustedContentHint: true }
+    annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: true }
   },
   {
     name: "readmate_generate_study_pack",
@@ -80,7 +82,7 @@ export const READMATE_TOOL_CONTRACTS = [
     description:
       "Fill a visible review form to generate learning material for one owned document. Use only after confirming the document; it can consume AI quota and changes learning data only after manual user submission.",
     inputSchema: READMATE_TOOL_SCHEMAS.readmate_generate_study_pack,
-    annotations: { readOnlyHint: false, untrustedContentHint: true }
+    annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: true }
   }
 ] as const satisfies readonly ReadMateToolContract[];
 

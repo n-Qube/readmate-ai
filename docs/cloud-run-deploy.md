@@ -19,7 +19,6 @@ Production deployments use `cloudbuild.yaml`; do not deploy from a developer lap
    - `readmate-supabase-service-role-key`
    - `readmate-gemini-api-key`
    - `readmate-khaya-api-key`
-   - `readmate-cartesia-api-key`
    - `readmate-cron-secret`
    - `readmate-webmcp-audit-digest-key` (stable random value, at least 32 characters; preferably 32 random bytes encoded as base64 or hex)
 

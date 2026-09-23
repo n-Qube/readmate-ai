@@ -5,7 +5,8 @@ import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import { ApiError, apiBaseUrl } from "@/api/client";
-import { createSpeechAudioFile, getCartesiaVoices, getEntitlements } from "@/api/documents";
+import { createSpeechAudioFile, getEntitlements } from "@/api/documents";
+import { providerShortLabel } from "@/config/tts-providers";
 import { AppIcon, type AppIconName } from "@/components/app-icon";
 import { NavBackButton, PageHeader, Screen, SectionCard, SectionHeading, colors } from "@/components/mobile-design";
 import { SettingsPanel, type SettingsSection } from "@/components/settings-panel";
@@ -30,11 +31,6 @@ export default function SettingsScreen() {
     enabled: Boolean(isSignedIn)
   });
   const isPremium = entitlementQuery.data?.isPremium ?? false;
-  const cartesiaVoicesQuery = useQuery({
-    queryKey: ["tts-voices", "cartesia"],
-    queryFn: async () => getCartesiaVoices(await getToken()),
-    enabled: currentSettings.provider === "cartesia" && isPremium
-  });
   const deleteAccountWithReverification = useReverification(async () => {
     const token = await getToken({ skipCache: true });
     if (!token) throw new Error("Sign in again before deleting your account.");
@@ -152,7 +148,7 @@ export default function SettingsScreen() {
       ) : section === "account" ? (
         <AccountCard user={user} plan={entitlementQuery.data?.plan} deletingAccount={deletingAccount} onManagePlan={() => router.push({ pathname: "/premium", params: { source: "account" } })} onSignOut={() => signOut()} onDelete={confirmAccountDeletion} />
       ) : (
-        <SettingsPanel section={section} settings={currentSettings} saving={saveSettings.isPending} cartesiaVoices={cartesiaVoicesQuery.data} isPremium={isPremium} previewingVoice={previewingVoice} onPreviewVoice={(language, voice) => void previewLocalVoice(language, voice)} onPremiumFeaturePress={() => router.push({ pathname: "/premium", params: { source: "premium_audio" } })} onChange={(next) => saveSettings.mutate(next)} />
+        <SettingsPanel section={section} settings={currentSettings} saving={saveSettings.isPending} isPremium={isPremium} previewingVoice={previewingVoice} onPreviewVoice={(language, voice) => void previewLocalVoice(language, voice)} onPremiumFeaturePress={() => router.push({ pathname: "/premium", params: { source: "premium_audio" } })} onChange={(next) => saveSettings.mutate(next)} />
       )}
     </Screen>
   );
@@ -218,7 +214,7 @@ function normalizeSection(value?: string | string[]): SettingsSection | "account
 }
 
 function settingsCategoryValue(section: SettingsSection, settings: ReturnType<typeof defaultSettings>): string {
-  if (section === "listening") return `${settings.provider === "cartesia" ? "Cartesia" : "Google"} · ${settings.speed}x`;
+  if (section === "listening") return `${providerShortLabel(settings.provider)} · ${settings.speed}x`;
   if (section === "language") return languageShortLabel(settings.targetLanguage);
   if (section === "reading") return settings.autoScroll ? "Auto-scroll on" : "Manual scroll";
   if (section === "study") return "Daily review";

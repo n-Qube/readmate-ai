@@ -41,6 +41,8 @@ describe("ReadMate WebMCP tool contracts", () => {
       false
     ]);
     expect(READMATE_DECLARATIVE_TOOL_CONTRACTS.every((tool) => !tool.annotations.readOnlyHint)).toBe(true);
+    expect(READMATE_DECLARATIVE_TOOL_CONTRACTS.every((tool) => tool.annotations.consequentialHint)).toBe(true);
+    expect(READMATE_IMPERATIVE_TOOL_CONTRACTS.some((tool) => tool.annotations.consequentialHint)).toBe(false);
   });
 
   it("describes the human and safety boundary for each write contract", () => {

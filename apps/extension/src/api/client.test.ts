@@ -486,6 +486,15 @@ describe("sync client", () => {
     )).rejects.toThrow("Unable to generate speech: Text-to-speech is temporarily unavailable.");
   });
 
+  it("requests neutral-rate Gemini speech because playback applies the listener's speed", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob(["wav"]), { status: 200, headers: { "Content-Type": "audio/wav" } }));
+
+    await requestTtsAudio({ ...settings, ttsProvider: "gemini-lite", voice: "Aoede", speed: 1.5 }, "token", "Hello");
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({ provider: "gemini-lite", voice: "Aoede", speed: 1 });
+  });
+
   it("loads the signed-in account's document limits", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       plan: "free",

@@ -10,6 +10,7 @@ type ReadMateWebMcpInput = Record<string, unknown>;
 type ReadMateWebMcpAnnotations = {
   readOnlyHint?: boolean;
   untrustedContentHint?: boolean;
+  consequentialHint?: boolean;
 };
 
 type ReadMateWebMcpExecuteContext = {

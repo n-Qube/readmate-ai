@@ -48,16 +48,20 @@ describe("WebMCP player deep links", () => {
     }));
   });
 
-  it("repairs a Google voice saved against the Cartesia provider", () => {
-    expect(settingsForPlayerDeepLink(settings({ provider: "cartesia", voice: "en-US-Neural2-J" }), "en")).toEqual(expect.objectContaining({
-      provider: "cartesia",
+  it("repairs a Google voice saved against a Gemini provider", () => {
+    expect(settingsForPlayerDeepLink(settings({ provider: "gemini", voice: "en-US-Neural2-J" }), "en")).toEqual(expect.objectContaining({
+      provider: "gemini",
       targetLanguage: "en",
-      voice: "cartesia-default"
+      voice: "Kore"
     }));
   });
 
-  it("repairs a Cartesia voice saved against the Google provider", () => {
-    expect(settingsForPlayerDeepLink(settings({ provider: "google", voice: "cartesia-default" }), "en")).toEqual(expect.objectContaining({
+  it("keeps any catalogue Gemini voice, including ones outside the mobile picker", () => {
+    expect(voiceForPlayerLanguage("gemini-lite", "Zubenelgenubi", "en")).toBe("Zubenelgenubi");
+  });
+
+  it("repairs a Gemini voice saved against the Google provider", () => {
+    expect(settingsForPlayerDeepLink(settings({ provider: "google", voice: "Kore" }), "en")).toEqual(expect.objectContaining({
       provider: "google",
       targetLanguage: "en",
       voice: "en-US-Neural2-F"

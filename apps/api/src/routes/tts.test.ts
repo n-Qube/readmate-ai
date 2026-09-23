@@ -59,9 +59,9 @@ describe("Google TTS authentication", () => {
     delete process.env.KHAYA_TOTAL_AUDIO_MAX_BYTES;
     delete process.env.LOCAL_SPEECH_MAX_ATTEMPTS;
     delete process.env.LOCAL_SPEECH_RETRY_BASE_MS;
-    delete process.env.CARTESIA_API_KEY;
-    delete process.env.CARTESIA_VOICE_ID;
-    delete process.env.CARTESIA_MODEL_ID;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_TTS_MODEL;
+    delete process.env.GEMINI_TTS_LITE_MODEL;
   });
 
   afterEach(() => {
@@ -139,58 +139,95 @@ describe("Google TTS authentication", () => {
     }
   });
 
-  it("synthesizes English with Cartesia without exposing the API key to the client", async () => {
-    process.env.CARTESIA_API_KEY = "cartesia-secret";
-    process.env.CARTESIA_VOICE_ID = "voice_natural";
-    const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) => new Response(Buffer.from("cartesia-audio"), {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" }
-    }));
+  it("synthesizes English with Gemini Flash TTS as WAV without exposing the API key to the client", async () => {
+    process.env.GEMINI_API_KEY = "gemini-secret";
+    const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      status: "completed",
+      steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: testWav(3).toString("base64") }] }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     const speech = await __ttsInternals.synthesizeSpeech({
       text: "Read this naturally.",
-      provider: "cartesia",
-      voice: "cartesia-default",
+      provider: "gemini",
+      voice: "Charon",
       targetLanguage: "en",
-      speed: 1.25
+      speed: 1
     });
 
-    expect(speech).toMatchObject({ contentType: "audio/mpeg", provider: "cartesia" });
-    expect(speech.buffer.toString()).toBe("cartesia-audio");
-    expect(fetchMock).toHaveBeenCalledWith("https://api.cartesia.ai/tts/bytes", expect.objectContaining({
+    expect(speech).toMatchObject({ contentType: "audio/wav", provider: "gemini" });
+    expect(speech.buffer.equals(testWav(3))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/interactions", expect.objectContaining({
       method: "POST",
-      headers: expect.objectContaining({
-        Authorization: "Bearer cartesia-secret",
-        "Cartesia-Version": "2026-03-01"
-      })
+      headers: expect.objectContaining({ "x-goog-api-key": "gemini-secret" })
     }));
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(requestBody).toMatchObject({
-      model_id: "sonic-3",
-      transcript: "Read this naturally.",
-      voice: { id: "voice_natural" },
-      language: "en",
-      generation_config: { speed: 1.25 }
+      model: "gemini-3.8-flash-tts",
+      store: false,
+      generation_config: { speech_config: [{ voice: "Charon" }] }
     });
+    expect(requestBody.input[0].content[0].text).toBe("Read this naturally.");
   });
 
-  it("blocks premium Cartesia audio for Free accounts before calling the provider", async () => {
+  it("routes gemini-lite to Gemini 3.8 Flash-Lite TTS", async () => {
+    process.env.GEMINI_API_KEY = "gemini-secret";
+    const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ output_audio: { data: testWav(2).toString("base64") } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const speech = await __ttsInternals.synthesizeSpeech({ text: "Lite voice.", provider: "gemini-lite", voice: "Kore", targetLanguage: "en", speed: 1 });
+
+    expect(speech.provider).toBe("gemini-lite");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).model).toBe("gemini-3.8-flash-lite-tts");
+  });
+
+  it("blocks premium Gemini Flash audio for Free accounts before calling the provider", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const response = await request(createTtsTestApp({ getEntitlement: () => entitlementForPlan("free") }))
       .post("/api/tts")
-      .send({ text: "Premium voice sample.", provider: "cartesia", voice: "cartesia-default", targetLanguage: "en", speed: 1 })
+      .send({ text: "Premium voice sample.", provider: "gemini", voice: "Kore", targetLanguage: "en", speed: 1 })
       .expect(403);
 
     expect(response.body).toMatchObject({ code: "PREMIUM_REQUIRED", feature: "premium_audio" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps GhanaNLP routing for Twi even when Cartesia is selected", async () => {
+  it("treats a retired Cartesia selection from an old client as premium Gemini audio", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await request(createTtsTestApp({ getEntitlement: () => entitlementForPlan("free") }))
+      .post("/api/tts")
+      .send({ text: "Premium voice sample.", provider: "cartesia", voice: "cartesia-default", targetLanguage: "en", speed: 1 })
+      .expect(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("serves Gemini Flash-Lite audio to Free accounts", async () => {
+    process.env.GEMINI_API_KEY = "gemini-secret";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_audio: { data: testWav(4).toString("base64") } }), { status: 200 })));
+    const response = await request(createTtsTestApp({ getEntitlement: () => entitlementForPlan("free") }))
+      .post("/api/tts")
+      .send({ text: "Free natural voice.", provider: "gemini-lite", voice: "Puck", targetLanguage: "en", speed: 1 })
+      .expect(200);
+
+    expect(response.headers["content-type"]).toContain("audio/wav");
+    expect(response.headers["x-readmate-tts-provider"]).toBe("gemini-lite");
+  });
+
+  it("lists the Gemini voice catalogue without a Premium lookup", async () => {
+    const response = await request(createTtsTestApp({ getEntitlement: () => { throw new Error("should not be called"); } }))
+      .get("/api/tts/voices")
+      .expect(200);
+    expect(response.body.voices).toHaveLength(30);
+    expect(response.body.voices[0]).toEqual({ id: "Kore", name: "Kore", description: "Firm" });
+  });
+
+  it("keeps GhanaNLP routing for Twi even when Gemini is selected", async () => {
     process.env.GOOGLE_TRANSLATE_API_KEY = "test-google-translate-key";
     process.env.KHAYA_API_KEY = "test-khaya-key";
-    process.env.CARTESIA_API_KEY = "cartesia-secret";
+    process.env.GEMINI_API_KEY = "gemini-secret";
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { translations: [{ translatedText: "Twi translation" }] } }), {
@@ -205,8 +242,8 @@ describe("Google TTS authentication", () => {
 
     const speech = await __ttsInternals.synthesizeSpeech({
       text: "Read this aloud.",
-      provider: "cartesia",
-      voice: "cartesia-default",
+      provider: "gemini",
+      voice: "Kore",
       targetLanguage: "tw",
       speed: 1
     });

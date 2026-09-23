@@ -29,7 +29,7 @@ export type ReadingDocument = {
     sentenceIndex: number;
     percent: number;
   };
-  provider: "google" | "cartesia";
+  provider: "google" | "gemini" | "gemini-lite";
   voice: string;
   speed: number;
   blocks: ReadingBlock[];
@@ -46,7 +46,7 @@ export type ReadingBlock = {
 
 export type UserSettings = {
   userId: string;
-  provider: "google" | "cartesia";
+  provider: "google" | "gemini" | "gemini-lite";
   voice: string;
   speed: number;
   tone?: string;

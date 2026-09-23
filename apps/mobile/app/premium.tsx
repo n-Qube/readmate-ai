@@ -187,7 +187,7 @@ export default function PremiumScreen() {
             <Text selectable style={{ color: "rgba(255,253,248,0.72)", fontSize: 13 }}>One membership across your signed-in devices</Text>
           </View>
         </View>
-        <PremiumFeature icon="waveform" title="Natural premium audio" body="Use Cartesia voices for English listening." />
+        <PremiumFeature icon="waveform" title="Natural premium audio" body="Studio-quality Gemini 3.8 Flash voices for English listening." />
         <PremiumFeature icon="doc.text" title="Larger documents" body="Upload longer PDFs and documents within your Premium limits." />
         <PremiumFeature icon="headphones" title="More daily listening" body="Higher text-to-speech usage for serious reading sessions." />
       </View>
@@ -328,7 +328,7 @@ function normalizeSource(value?: string): PremiumSource {
 
 function premiumSubtitle(source: PremiumSource, active: boolean): string {
   if (active) return "Premium audio, larger documents, and higher listening limits are available on this account.";
-  if (source === "premium_audio") return "Upgrade to unlock Cartesia natural voices. Twi, Ewe, Ga, and Google audio remain available on Free.";
+  if (source === "premium_audio") return "Upgrade to unlock Gemini Flash studio-quality voices. Gemini Lite, Google, Twi, Ewe, and Ga audio remain available on Free.";
   if (source === "large_documents") return "Upgrade when a document is larger than the Free upload or PDF page limits.";
   return "Choose a plan from your app store. Prices below come directly from the store for your region.";
 }

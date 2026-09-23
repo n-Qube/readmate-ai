@@ -2,19 +2,23 @@ import { Pressable, Text, View } from "react-native";
 import type { ReactNode } from "react";
 import { AppIcon, type AppIconName } from "@/components/app-icon";
 import { SectionCard, colors, radius } from "@/components/mobile-design";
-import type { TtsVoiceOption } from "@/api/documents";
 import { defaultVoiceForLanguage, localVoiceLabel, voicesForLanguage, type LocalLanguage } from "@/config/local-voices";
+import {
+  DEFAULT_VOICE_BY_PROVIDER,
+  GEMINI_READING_VOICES,
+  GOOGLE_VOICES,
+  isGeminiProvider,
+  isGeminiVoice,
+  isPremiumProvider,
+  providerLongLabel,
+  TTS_PROVIDERS
+} from "@/config/tts-providers";
 import type { ReadingDocument, UserSettings } from "@/types";
-
-const voices = {
-  google: ["en-US-Neural2-F", "en-US-Neural2-D", "en-US-Neural2-J", "en-US-Studio-O"],
-  cartesia: ["cartesia-default"]
-} as const;
 
 const speeds = [0.75, 1, 1.25, 1.5, 2];
 const articleCounts = [5, 10, 15, 20, 25, 50];
 const languageOptions = [
-  { code: "en", label: "English", provider: "Google or Cartesia" },
+  { code: "en", label: "English", provider: "Google or Gemini" },
   { code: "tw", label: "Twi", provider: "Google Translate + GhanaNLP TTS" },
   { code: "ee", label: "Ewe", provider: "Google Translate + Khaya TTS v2" },
   { code: "gaa", label: "Ga", provider: "Khaya Translation + TTS v2" }
@@ -26,7 +30,6 @@ type SettingsPanelProps = {
   settings: Omit<UserSettings, "userId" | "updatedAt">;
   section: SettingsSection;
   saving?: boolean;
-  cartesiaVoices?: TtsVoiceOption[];
   isPremium?: boolean;
   previewingVoice?: string;
   onPreviewVoice?: (language: LocalLanguage, voice: string) => void;
@@ -34,15 +37,16 @@ type SettingsPanelProps = {
   onChange: (settings: Omit<UserSettings, "userId" | "updatedAt">) => void;
 };
 
-export function SettingsPanel({ settings, section, saving = false, cartesiaVoices = [], isPremium = false, previewingVoice, onPreviewVoice, onPremiumFeaturePress, onChange }: SettingsPanelProps) {
-  const providerVoices = settings.provider === "cartesia"
-    ? (cartesiaVoices.length
-      ? cartesiaVoices
-      : [
-          { id: "cartesia-default", name: "Natural default", description: "Your configured Cartesia voice." },
-          ...(settings.voice !== "cartesia-default" ? [{ id: settings.voice, name: "Selected Cartesia voice", description: "The voice currently saved to your account." }] : [])
-        ])
-    : voices.google.map((id) => ({ id, name: voiceShortLabel(id) }));
+export function SettingsPanel({ settings, section, saving = false, isPremium = false, previewingVoice, onPreviewVoice, onPremiumFeaturePress, onChange }: SettingsPanelProps) {
+  const providerVoices: Array<{ id: string; name: string }> = isGeminiProvider(settings.provider)
+    ? [
+        ...GEMINI_READING_VOICES.map((voice) => ({ id: voice.id, name: `${voice.name} · ${voice.description}` })),
+        // Keep a voice chosen on another device selectable even when it is outside the curated list.
+        ...(GEMINI_READING_VOICES.some((voice) => voice.id === settings.voice) || !isGeminiVoice(settings.voice)
+          ? []
+          : [{ id: settings.voice, name: settings.voice }])
+      ]
+    : GOOGLE_VOICES.map((id) => ({ id, name: voiceShortLabel(id) }));
   const selectedVoice = providerVoices.some((voice) => voice.id === settings.voice)
     ? settings.voice
     : providerVoices[0]?.id ?? settings.voice;
@@ -71,7 +75,7 @@ function LanguageSettings({ settings, onChange }: Pick<SettingsPanelProps, "sett
           ...settings,
           targetLanguage,
           voice: targetLanguage === "en"
-            ? settings.provider === "cartesia" ? "cartesia-default" : "en-US-Neural2-F"
+            ? DEFAULT_VOICE_BY_PROVIDER[settings.provider]
             : voicesForLanguage(targetLanguage).some((voice) => voice.id === settings.voice)
               ? settings.voice
               : defaultVoiceForLanguage(targetLanguage)
@@ -98,14 +102,19 @@ function ListeningSettings({ settings, voiceOptions, selectedVoice, voiceLabels,
         <>
           <SegmentedControl
             label="Reading voice quality"
-            options={["google", "cartesia"] as const}
+            options={[...TTS_PROVIDERS]}
             value={settings.provider}
-            onChange={(provider) => onChange({ ...settings, provider, voice: provider === "cartesia" ? "cartesia-default" : "en-US-Neural2-F" })}
-            shortLabels={{ google: "Google · Standard", cartesia: isPremium ? "Cartesia · Premium" : "Cartesia · Premium · Locked" }}
-            disabledOptions={isPremium ? [] : ["cartesia"]}
+            onChange={(provider) => onChange({ ...settings, provider, voice: DEFAULT_VOICE_BY_PROVIDER[provider] })}
+            shortLabels={{
+              google: "Google · Standard",
+              "gemini-lite": "Gemini Lite · Natural",
+              gemini: isPremium ? "Gemini Flash · Premium" : "Gemini Flash · Premium · Locked"
+            }}
+            disabledOptions={isPremium ? [] : TTS_PROVIDERS.filter(isPremiumProvider)}
             onDisabledPress={onPremiumFeaturePress}
           />
-          {!isPremium ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Google, Twi, Ewe, and Ga remain available on Free. Cartesia natural voices are a Premium feature.</Text> : null}
+          {!isPremium ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Google, Gemini Lite, Twi, Ewe, and Ga are available on Free. Gemini Flash studio-quality voices are a Premium feature.</Text> : null}
+          {isGeminiProvider(settings.provider) ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Gemini voices are AI-generated.</Text> : null}
           <SettingRow icon="speaker.wave.2.fill" tone="blue" label="Voice" value={voiceLabels[selectedVoice] ?? voiceShortLabel(selectedVoice)} />
           <SegmentedControl label="Choose voice" options={voiceOptions} value={selectedVoice} onChange={(voice) => onChange({ ...settings, voice })} shortLabels={voiceLabels} />
         </>
@@ -261,7 +270,6 @@ const groupLabelStyle = {
 };
 
 function voiceShortLabel(voice: string): string {
-  if (voice === "cartesia-default") return "Natural voice";
   return voice.replace(/^en-US-/, "").replace(/-/g, " ");
 }
 
@@ -271,5 +279,5 @@ function languageLabel(language: UserSettings["targetLanguage"]): string {
 
 function languageProviderLabel(settings: Pick<UserSettings, "targetLanguage" | "provider">): string {
   if (settings.targetLanguage !== "en") return "GhanaNLP";
-  return settings.provider === "cartesia" ? "Cartesia Natural" : "Google TTS";
+  return providerLongLabel(settings.provider);
 }

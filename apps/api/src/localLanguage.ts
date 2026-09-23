@@ -72,7 +72,7 @@ type TwiFallbackSynthesisResult = KhayaSynthesisResult & {
   provider: "nano-twi";
 };
 
-export type SpeechDependency = "google_translate" | "khaya_translate" | "khaya_tts" | "khaya_audio";
+export type SpeechDependency = "google_translate" | "khaya_translate" | "khaya_tts" | "khaya_audio" | "gemini_tts";
 
 /**
  * Preserve safe provider metadata across the route boundary without exposing
@@ -881,6 +881,7 @@ function providerNetworkErrorMessage(dependency: SpeechDependency, error: unknow
 function speechDependencyLabel(dependency: SpeechDependency): string {
   if (dependency === "google_translate") return "Google Translate";
   if (dependency === "khaya_translate") return "Khaya Translation";
+  if (dependency === "gemini_tts") return "Gemini Text-to-Speech";
   return "Khaya Text-to-Speech";
 }
 
