@@ -6,7 +6,7 @@ import { fetchWithTimeout } from "../fetchWithTimeout.js";
 import { getGoogleAccessToken, resetGoogleTokenCacheForTests } from "../googleAuth.js";
 import { isLocalLanguage, SpeechDependencyError, synthesizeLocalLanguageSpeech } from "../localLanguage.js";
 import { nanoTwiConfigured, synthesizeNanoTwiSpeech } from "../nanoTwi.js";
-import { GEMINI_TTS_VOICE_OPTIONS, isGeminiTtsProvider, isPremiumTtsProvider, parseTtsRequest, type TtsProvider } from "../ttsSchema.js";
+import { DEFAULT_VOICE_BY_PROVIDER, GEMINI_TTS_VOICE_OPTIONS, isGeminiTtsProvider, isPremiumTtsProvider, parseTtsRequest, type TtsProvider } from "../ttsSchema.js";
 import { synthesizeGeminiSpeech } from "../geminiTts.js";
 import { splitTextForSpeech } from "../speechChunks.js";
 import { getUserId, type AuthedRequest } from "../auth.js";
@@ -105,17 +105,35 @@ async function synthesizeSpeech(payload: ReturnType<typeof parseTtsRequest>): Pr
     return speech;
   }
   if (isGeminiTtsProvider(payload.provider)) {
-    return {
-      buffer: await synthesizeGeminiSpeech({
-        provider: payload.provider,
-        text: payload.text,
-        voice: payload.voice,
-        speed: payload.speed,
-        instructions: payload.instructions
-      }),
-      contentType: "audio/wav",
-      provider: payload.provider
-    };
+    try {
+      return {
+        buffer: await synthesizeGeminiSpeech({
+          provider: payload.provider,
+          text: payload.text,
+          voice: payload.voice,
+          speed: payload.speed,
+          instructions: payload.instructions
+        }),
+        contentType: "audio/wav",
+        provider: payload.provider
+      };
+    } catch (error) {
+      if (!(error instanceof SpeechDependencyError) || error.dependency !== "gemini_tts") throw error;
+      // Keep playback working when Gemini is rate limited, over quota, or down:
+      // answer with the standard Google voice and say so in the provider header.
+      console.warn(JSON.stringify({
+        event: "tts_provider_fallback",
+        from: payload.provider,
+        to: "google",
+        upstreamStatus: error.upstreamStatus,
+        timedOut: error.timedOut
+      }));
+      return {
+        buffer: await synthesizeWithGoogle({ ...payload, provider: "google", voice: DEFAULT_VOICE_BY_PROVIDER.google }),
+        contentType: "audio/mpeg",
+        provider: "google"
+      };
+    }
   }
   return {
     buffer: await synthesizeWithGoogle(payload),

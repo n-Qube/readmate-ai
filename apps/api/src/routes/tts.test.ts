@@ -170,6 +170,27 @@ describe("Google TTS authentication", () => {
     expect(requestBody.input[0].content[0].text).toBe("Read this naturally.");
   });
 
+  it("falls back to Google audio when Gemini is rate limited, and says so in the provider header", async () => {
+    process.env.GEMINI_API_KEY = "gemini-secret";
+    process.env.GOOGLE_TTS_API_KEY = "google-key";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async (input: string | URL) => String(input).includes("generativelanguage")
+      ? new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED" } }), { status: 429 })
+      : new Response(JSON.stringify({ audioContent: Buffer.from("google-mp3").toString("base64") }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(createTtsTestApp())
+      .post("/api/tts")
+      .send({ text: "Keep playing.", provider: "gemini-lite", voice: "Kore", targetLanguage: "en", speed: 1 })
+      .expect(200);
+
+    expect(response.headers["content-type"]).toContain("audio/mpeg");
+    expect(response.headers["x-readmate-tts-provider"]).toBe("google");
+    const googleCall = fetchMock.mock.calls.find(([url]) => String(url).includes("texttospeech"));
+    expect(JSON.parse(String((googleCall as unknown as [string, RequestInit])[1].body)).voice.name).toBe("en-US-Neural2-F");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"event":"tts_provider_fallback"'));
+  });
+
   it("routes gemini-lite to Gemini 3.8 Flash-Lite TTS", async () => {
     process.env.GEMINI_API_KEY = "gemini-secret";
     const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) =>
