@@ -12,7 +12,7 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 
 1. **Treat GitHub as the only source of truth.** `n-Qube/readmate-ai` holds the 2026-08-30 challenge release. The local working copy it was published from is not linked to that remote: its git history is unrelated, its last commit is from 2026-05-28, and it tracks only 15 files. Changes made since the release were applied through a pull request. From now on, work from a clone of `n-Qube/readmate-ai`, require a green CI run (`.github/workflows/ci.yml`) before merging, and deploy only from commits on `main`.
 2. **The working copy lives in iCloud Drive with storage optimization on.** About 152k of 164k `node_modules` files, most of `apps/mobile/ios` and `apps/mobile/android`, and the native AirPlay/Cast module source (`ReadMateAirPlayModule.swift`, `ReadMateAirPlayModule.kt`, podspec) are evicted to the cloud (`dataless`). Reads block for about 25 s per file, so local `typecheck`, `test` and native builds hang. iCloud also created conflict copies (`* 2.*`). One of them, `app/(tabs)/index 2.tsx`, was a live Expo Router route, and another duplicated the Swift module class. Eight stale copies in source directories were moved to `~/readmate-sync-conflicts-2026-09-23/`. Fix: move the repository out of `~/Documents` (for example to `~/Developer/readmate`), or mark the folder "Keep Downloaded". Then run `npm ci`.
-3. **Local Node is 20.19.6 but `package.json` requires Node 22.13 or later.** Homebrew `node@22` (22.22.0) is installed. Put it first on `PATH` or pin it with `.nvmrc`.
+3. **Local Node is 20.19.6 but `package.json` requires Node 22.13 or later.** `.nvmrc` now pins 22, so run `nvm use` in the repo. Homebrew `node@22` (22.22.0) is installed. Put it first on `PATH` or pin it with `.nvmrc`.
 4. **The external gates from 2026-08-24 are still unevidenced.** These are credential rotation, migrations applied by the migration role, Secret Manager, Clerk production configuration, the EAS production environment and new binaries, a backup restore drill, monitoring, and budget alerts. See the section below. None of them can be verified from the repository.
 
 ### P0 for the Gemini TTS release (added 2026-09-23)
@@ -34,21 +34,27 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 
 - Every CI run on `n-Qube/readmate-ai` fails before starting: "The job was not started because your account is locked due to a billing issue." Resolve it in the GitHub billing settings for the account. Until then, run `npm ci && npm run verify:release` on a clean clone before merging. On 2026-09-23 this passed for PR #1.
 
-### P1: performance
+### P1: performance (fixed 2026-09-23; verify on devices)
 
-- **The mobile library downloads the full text of every document.** `GET /api/documents` returns up to 100 documents with every `ReadingBlock` (`documentInclude`). Mobile uses it for Home, Library, Study and WebMCP search, with a 30 s stale time. A Premium library of long PDFs can make each refresh many megabytes. The extension already uses the compact `GET /api/documents/library-page`. The fix needs playback changes: `playback-manager.tsx` builds segments from list items' `blocks`, and `playback-bar.tsx` only enables Play when they are present.
-  - Plan: switch the mobile list queries to `library-page`.
-  - Plan: have `selectDocument` or Play fetch `GET /api/documents/:id` before building segments.
-  - Plan: test playback, resume and lock-screen controls on real devices before release.
-- **`/api/learning/:id/flashcards` and `/quiz` each generate the whole study pack** (summary, key points, flashcards and quiz) and keep only one part. The extension calls them separately, so AI cost and latency are about three times what they need to be. Add a focused Gemini schema per mode.
-- **AI quota is charged before generation.** Users still spend quota when Gemini fails and the extractive fallback is served. Refund, or charge after success, once the usage bucket supports it.
+- **Mobile no longer downloads every document's text with the library.**
+  - Lists call `GET /api/documents?view=summary`. It returns the same shape without reading blocks or stored HTML, plus `blockCount`.
+  - Progress saves use `PATCH /api/documents/:id/progress?view=summary`.
+  - Playback loads a document in full on first play, sharing the document screen's `["document", id]` cache. A summary item never replaces text that is already loaded (`withKnownBlocks`).
+  - Default API responses are unchanged, so installed app builds keep working. **Deploy the API before shipping the new mobile build**: older APIs reject `view` with a 400.
+  - **Device check:** play from Home, Library and History; resume mid-document; skip blocks; use lock-screen controls and Cast; switch items while one is loading.
+- **Flashcards and quiz regenerate on their own.** `/api/learning/:id/flashcards` and `/quiz` call focused Gemini prompts with single-part schemas. They previously generated a whole pack, which tripled cost and replaced the *other* part in the review store, orphaning quiz attempts. Syncs now touch only the part that was generated.
+- **AI quota is refunded** when the Gemini call fails and fallback content is served, including for Ask AI (`releaseDailyUsage`).
 
 ### P1: product requirements gaps
 
-- **Share into ReadMate (mobile MVP).** Neither platform has an iOS share extension or an Android `SEND` intent. The PRD lists "Share URL into ReadMate" as a mobile MVP surface. Implementing it needs a config plugin and native builds.
+- **Share into ReadMate is on for Android and ready for iOS.** `expo-share-intent@7.0.0` (Expo SDK 56) adds an Android `SEND text/*` filter, verified with `expo prebuild`. A shared link opens Add content pre-filled, and the user taps Add to save it. iOS is configured but switched off (`"disableIOS": true` in `app.json`) because the Share Extension needs its own identifiers. To enable it:
+  1. In the Apple Developer portal, register the extension's bundle ID (`ai.readmate.mobile.share-extension`) and add the existing App Group `group.ai.readmate.mobile` to it.
+  2. Set `disableIOS` to `false`.
+  3. Run `eas build -p ios` interactively once so EAS creates the provisioning profile.
+  4. Test sharing from Safari on a device.
 - **Learning model access.** Learning features default to `GEMINI_MODEL=gemini-2.5-flash`. There is no shutdown date, but Google now limits 2.5 access to projects that have used it before. A new GCP project or API key would lose access. Plan a move to a 3.x model, and re-validate the structured study output before switching.
 - **WebMCP production origin.** Chrome serves WebMCP behind an origin trial (Chrome 153+). Register the trial for the final `WEB_APP_ORIGIN` and deploy with `npm run deploy:firebase-hosting:guarded` so the `Origin-Trial` header is injected. Add the origin to the Clerk allowed origins and to the API `WEB_APP_ORIGIN`.
-- **Extension version.** Bump `apps/extension/package.json` and `public/manifest.json` from `0.1.5` together before packaging this change for the Chrome Web Store. `manifest.test.ts` requires the two versions to match.
+- **Extension version** is bumped to `0.1.6` in `package.json`, `manifest.json` and the lockfile.
 
 ### Fixed in this review
 
