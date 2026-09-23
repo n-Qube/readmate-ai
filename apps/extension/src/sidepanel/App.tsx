@@ -1,7 +1,7 @@
 import { BookOpen, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FastForward, FileText, FolderOpen, GraduationCap, Headphones, HelpCircle, History as HistoryIcon, Layers, Library, List, Lock, LogOut, Menu, MessageCircle, Mic2, Minus, MoreVertical, Pause, Play, RefreshCw, Rewind, Rss, Search, Send, Settings, SkipBack, SkipForward, Sparkles, Square, Trash2, Upload, Volume2, WifiOff, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteDocumentHistory, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, generateDocumentLearning, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, getRemoteSettings, listLibrary, markRemoteFlashcardReview, requestTtsAudio, saveRemoteSettings, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError, type ReadMateEntitlement } from "../api/client";
+import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteDocumentHistory, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, generateDocumentLearning, studyFallbackNotice, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, getRemoteSettings, listLibrary, markRemoteFlashcardReview, requestTtsAudio, saveRemoteSettings, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError, type ReadMateEntitlement } from "../api/client";
 import { getAuthSession, signOut as clearManualSession, type AuthSession } from "../auth/authClient";
 import { fileFromPdfResponse } from "../pdf/pdfDownload";
 import { extractPdfChunks } from "../pdf/pdfText";
@@ -805,9 +805,9 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
         flashcards: review ? flashcardsFromReview(review) : (updated.flashcards ?? current.flashcards),
         quizQuestions: review ? quizQuestionsFromReview(review) : (updated.quizQuestions ?? current.quizQuestions)
       }));
-      setNotice(generated.syncPending
+      setNotice(studyFallbackNotice(generated) ?? (generated.syncPending
         ? "Study material is ready. Review progress is still syncing."
-        : "Study material is ready. Open ReadMate mobile Study for flashcards, quiz, notes, and review.");
+        : "Study material is ready. Open ReadMate mobile Study for flashcards, quiz, notes, and review."));
     } catch (caught) {
       setLearningError({
         message: caught instanceof Error ? caught.message : "Could not generate Study material.",
@@ -898,9 +898,9 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
         citedSections: studyPanel.citedSections,
         lastQuestion: studyPanel.lastQuestion
       });
-      setNotice(generated.syncPending
+      setNotice(studyFallbackNotice(generated) ?? (generated.syncPending
         ? `${learnNoticeForMode(mode)} Review progress is still syncing.`
-        : learnNoticeForMode(mode));
+        : learnNoticeForMode(mode)));
     } catch (caught) {
       setLearningError({
         message: caught instanceof Error ? caught.message : "Could not generate learning material.",

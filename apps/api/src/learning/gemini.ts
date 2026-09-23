@@ -4,11 +4,21 @@ import { fetchWithTimeout } from "../fetchWithTimeout.js";
 type GeminiResponse = {
   candidates?: Array<{
     content?: {
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
+    finishReason?: string;
   }>;
+  promptFeedback?: { blockReason?: string };
   error?: { message?: string };
 };
+
+// A full study pack (summary, 12 key points, 24 flashcards, 12 quiz items)
+// needs several thousand output tokens. On thinking models, thinking tokens
+// share this budget, so a tight cap truncated the JSON and forced fallback.
+const LEARNING_MAX_OUTPUT_TOKENS = 16_384;
+// Structured generation routinely outlasts the 15 s default for other
+// outbound calls; timing out here silently served extractive fallback.
+const DEFAULT_LEARNING_TIMEOUT_MS = 45_000;
 
 export type LearningGenerator = {
   generateLearning(input: { title: string; text: string; flashcardCount: number; quizCount: number }): Promise<LearningPayload>;
@@ -21,6 +31,7 @@ export class GeminiLearningGenerator implements LearningGenerator {
       apiKey?: string;
       model?: string;
       fetcher?: typeof fetch;
+      timeoutMs?: number;
     } = {}
   ) {}
 
@@ -92,16 +103,33 @@ export class GeminiLearningGenerator implements LearningGenerator {
           responseMimeType: "application/json",
           responseJsonSchema,
           temperature: 0.2,
-          maxOutputTokens: 8192
+          maxOutputTokens: LEARNING_MAX_OUTPUT_TOKENS,
+          ...thinkingConfigForModel(model)
         }
       })
-    }, { fetcher: this.options.fetcher });
+    }, { fetcher: this.options.fetcher, timeoutMs: this.options.timeoutMs ?? learningTimeoutFromEnv() });
     const body = (await response.json()) as GeminiResponse;
     if (!response.ok) throw new Error(body.error?.message ?? "Gemini request failed.");
-    const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
-    if (!text) throw new Error("Gemini did not return structured JSON.");
+    if (body.promptFeedback?.blockReason) throw new Error(`Gemini blocked the study request (${body.promptFeedback.blockReason}).`);
+    const candidate = body.candidates?.[0];
+    const text = candidate?.content?.parts?.filter((part) => !part.thought).map((part) => part.text ?? "").join("").trim();
+    if (candidate?.finishReason === "MAX_TOKENS") throw new Error("Gemini study output was truncated at the token limit.");
+    if (!text) throw new Error(`Gemini did not return structured JSON${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
     return text;
   }
+}
+
+/**
+ * Gemini 2.5 Flash thinks by default, which slows structured extraction and
+ * spends the output budget. Grounded study extraction does not need it.
+ */
+export function thinkingConfigForModel(model: string): { thinkingConfig?: { thinkingBudget: number } } {
+  return /^gemini-2\.5-flash(?!-lite)/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {};
+}
+
+function learningTimeoutFromEnv(): number {
+  const configured = Number(process.env.GEMINI_LEARNING_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LEARNING_TIMEOUT_MS;
 }
 
 function isTimeoutError(error: unknown): boolean {

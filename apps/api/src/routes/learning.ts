@@ -284,9 +284,11 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
 
       if (action.kind === "execute") await accountDeletionGuard(userId);
       await chargeAiUsage(consumeUsage, userId, document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
+      const generated = await generateLearningForDocument(generator, document, options);
+      const saved = savedLearningToPreserve(document, generated.fallback);
+      const learning = saved ?? generated.learning;
       if (action.kind === "execute") await accountDeletionGuard(userId);
-      const updated = await documentRepository.updateDocument(userId, document.id, {
+      const updated = saved ? document : await documentRepository.updateDocument(userId, document.id, {
         summary: learning.summary.detailed,
         keyPoints: learning.keyPoints,
         topicTags: learning.topicTags,
@@ -294,10 +296,10 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
         quizQuestions: learning.quiz.map((quiz) => ({ question: quiz.question, answer: `${quiz.correctAnswer}\n\n${quiz.explanation}` }))
       });
       if (action.kind === "execute") await accountDeletionGuard(userId);
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, userId, document.id, learning));
+      const syncPending = saved ? false : !(await syncGeneratedLearningResiliently(learningRepository, userId, document.id, learning));
       await completeStudyPackEffect(studyPackEffect);
       await completeWebMcpAction(webMcpAction, { resourceType: "study_pack", resourceId: document.id });
-      res.json({ learning, document: updated, fallback, syncPending, requested: options });
+      res.json({ learning, document: updated, fallback: generated.fallback, preserved: Boolean(saved), syncPending, requested: options });
     } catch (error) {
       await failStudyPackEffect(studyPackEffect, error);
       await failWebMcpAction(webMcpAction, error);
@@ -315,11 +317,13 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       const document = await loadDocument(documentRepository, getUserId(req), String(req.params.documentId), res);
       if (!document) return;
       await chargeAiUsage(consumeUsage, getUserId(req), document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
+      const generated = await generateLearningForDocument(generator, document, options);
+      const saved = savedLearningToPreserve(document, generated.fallback);
+      const learning = saved ?? generated.learning;
       const flashcards = learning.flashcards.map((card) => ({ front: card.question, back: card.answer }));
-      const updated = await documentRepository.updateDocument(getUserId(req), document.id, { flashcards });
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
-      res.json({ flashcards: learning.flashcards, document: updated, fallback, syncPending, requested: options });
+      const updated = saved ? document : await documentRepository.updateDocument(getUserId(req), document.id, { flashcards });
+      const syncPending = saved ? false : !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
+      res.json({ flashcards: learning.flashcards, document: updated, fallback: generated.fallback, preserved: Boolean(saved), syncPending, requested: options });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.issues[0]?.message ?? "Invalid flashcard generation request." });
@@ -335,11 +339,13 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       const document = await loadDocument(documentRepository, getUserId(req), String(req.params.documentId), res);
       if (!document) return;
       await chargeAiUsage(consumeUsage, getUserId(req), document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
+      const generated = await generateLearningForDocument(generator, document, options);
+      const saved = savedLearningToPreserve(document, generated.fallback);
+      const learning = saved ?? generated.learning;
       const quizQuestions = learning.quiz.map((quiz) => ({ question: quiz.question, answer: `${quiz.correctAnswer}\n\n${quiz.explanation}` }));
-      const updated = await documentRepository.updateDocument(getUserId(req), document.id, { quizQuestions });
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
-      res.json({ quiz: learning.quiz, document: updated, fallback, syncPending, requested: options });
+      const updated = saved ? document : await documentRepository.updateDocument(getUserId(req), document.id, { quizQuestions });
+      const syncPending = saved ? false : !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
+      res.json({ quiz: learning.quiz, document: updated, fallback: generated.fallback, preserved: Boolean(saved), syncPending, requested: options });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.issues[0]?.message ?? "Invalid quiz generation request." });
@@ -523,6 +529,19 @@ function parseLearningGenerationOptions(body: unknown): LearningGenerationOption
     quizCount: parsed.quizCount ?? DEFAULT_QUIZ_COUNT,
     targetLanguage: parsed.targetLanguage
   };
+}
+
+/**
+ * Extractive fallback is a stopgap for documents with no study material. It
+ * must never replace a complete saved set, which is usually AI-generated.
+ */
+function savedLearningToPreserve(document: ReadingDocumentResponse, fallback: boolean): LearningPayload | null {
+  if (!fallback) return null;
+  try {
+    return learningPayloadForReplay(document);
+  } catch {
+    return null;
+  }
 }
 
 function learningPayloadForReplay(document: ReadingDocumentResponse): LearningPayload {

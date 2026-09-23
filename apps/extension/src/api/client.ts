@@ -544,9 +544,20 @@ export type LearningGenerationOptions = {
 
 export type LearningGenerationResult = {
   document: ReadingDocument;
+  /** The AI service was unavailable, so the server used quick notes from the text. */
   fallback: boolean;
+  /** On fallback, an existing saved study set was kept instead of replaced. */
+  preserved: boolean;
   syncPending: boolean;
 };
+
+/** User-facing note when Study material did not come from the AI service. */
+export function studyFallbackNotice(result: Pick<LearningGenerationResult, "fallback" | "preserved">): string | null {
+  if (!result.fallback) return null;
+  return result.preserved
+    ? "ReadMate AI is busy, so your saved study set was kept. Try generating again in a few minutes."
+    : "ReadMate AI is busy, so these are quick study notes taken from the text. Try generating again in a few minutes for AI flashcards and quiz questions.";
+}
 
 export async function generateDocumentLearning(
   apiBaseUrl: string,
@@ -569,6 +580,7 @@ export async function generateDocumentLearning(
   return {
     document: result.document,
     fallback: Boolean(result.fallback),
+    preserved: Boolean(result.preserved),
     syncPending: Boolean(result.syncPending)
   };
 }

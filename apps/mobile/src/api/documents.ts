@@ -304,13 +304,22 @@ export type LearningGenerationOptions = {
   targetLanguage?: UserSettings["targetLanguage"];
 };
 
+export type StudyGenerationResult = {
+  document: ReadingDocument;
+  syncPending?: boolean;
+  /** The AI service was unavailable, so the server used quick notes from the text. */
+  fallback?: boolean;
+  /** On fallback, the existing saved study set was kept instead of replaced. */
+  preserved?: boolean;
+};
+
 export function generateDocumentLearning(
   token: string | null,
   documentId: string,
   options: LearningGenerationOptions = {}
-): Promise<{ document: ReadingDocument; syncPending?: boolean }> {
+): Promise<StudyGenerationResult> {
   if (screenshotMode) return Promise.resolve({ document: mockDocuments.find((item) => item.id === documentId) ?? mockDocuments[0] });
-  return fetchJson<{ document: ReadingDocument; syncPending?: boolean }>(`/api/learning/${encodeURIComponent(documentId)}/summary`, token, {
+  return fetchJson<StudyGenerationResult>(`/api/learning/${encodeURIComponent(documentId)}/summary`, token, {
     method: "POST",
     body: JSON.stringify(options)
   });

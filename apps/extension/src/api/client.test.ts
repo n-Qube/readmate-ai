@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, fetchWithRetry, generateDocumentLearning, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, listHistory, listLibrary, markRemoteFlashcardReview, requestTtsAudio, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError } from "./client";
+import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, fetchWithRetry, generateDocumentLearning, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, listHistory, listLibrary, markRemoteFlashcardReview, requestTtsAudio, studyFallbackNotice, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError } from "./client";
 import type { ExtensionSettings, ReadingChunk, ReadingDocument } from "../shared/types";
 
 const settings: ExtensionSettings = {
@@ -778,3 +778,14 @@ class FakeXMLHttpRequest {
     this.onload?.();
   }
 }
+
+describe("study fallback notice", () => {
+  it("is silent for AI-generated study material", () => {
+    expect(studyFallbackNotice({ fallback: false, preserved: false })).toBeNull();
+  });
+
+  it("explains quick notes and a kept study set differently", () => {
+    expect(studyFallbackNotice({ fallback: true, preserved: false })).toMatch(/quick study notes/);
+    expect(studyFallbackNotice({ fallback: true, preserved: true })).toMatch(/saved study set was kept/);
+  });
+});

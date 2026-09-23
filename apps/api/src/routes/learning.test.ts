@@ -154,9 +154,10 @@ function createMemoryStudyPackEffectRepository(): StudyPackEffectRepository {
   return new PrismaStudyPackEffectRepository(delegate);
 }
 
-function createMemoryDocumentRepository(): DocumentRepository {
+function createMemoryDocumentRepository(options: { seedStudySet?: boolean } = {}): DocumentRepository {
   const documents = new Map<string, ReadingDocumentResponse>();
   const now = "2026-05-27T12:00:00.000Z";
+  const seedStudySet = options.seedStudySet ?? true;
   documents.set("doc_1", {
     id: "doc_1",
     userId: "owner",
@@ -170,11 +171,15 @@ function createMemoryDocumentRepository(): DocumentRepository {
     provider: "google",
     voice: "en-US-Neural2-F",
     speed: 1,
-    summary: "Library keeps saved items separate from recent listening history.",
-    keyPoints: ["Saved items stay in Library"],
-    flashcards: [{ front: "Stored card?", back: "Stored answer." }],
-    quizQuestions: [{ question: "Stored quiz?", answer: "Stored answer.\n\nStored explanation." }],
-    topicTags: ["AI", "Learning"],
+    ...(seedStudySet
+      ? {
+          summary: "Library keeps saved items separate from recent listening history.",
+          keyPoints: ["Saved items stay in Library"],
+          flashcards: [{ front: "Stored card?", back: "Stored answer." }],
+          quizQuestions: [{ question: "Stored quiz?", answer: "Stored answer.\n\nStored explanation." }],
+          topicTags: ["AI", "Learning"]
+        }
+      : { keyPoints: [], flashcards: [], quizQuestions: [], topicTags: [] }),
     blocks: [
       { id: "block_1", orderIndex: 0, blockType: "heading", text: "Learning article" },
       { id: "block_2", orderIndex: 1, blockType: "paragraph", text: "Gemini creates summaries, flashcards, and quizzes from saved reading material." },
@@ -693,7 +698,7 @@ describe("learningRouter", () => {
 
   it("falls back to extractive study material when Gemini is temporarily overloaded", async () => {
     const learningRepository = createMemoryLearningRepository();
-    const app = createTestApp(repository, createHighDemandGenerator(), learningRepository);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), createHighDemandGenerator(), learningRepository);
 
     const response = await request(app).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
 
@@ -709,6 +714,23 @@ describe("learningRouter", () => {
     );
   });
 
+  it.each(["summary", "flashcards", "quiz"])("keeps a saved AI study set instead of overwriting it with /%s fallback", async (mode) => {
+    const learningRepository = createMemoryLearningRepository();
+    await request(createTestApp(repository, generator, learningRepository)).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+    const updateDocument = vi.spyOn(repository, "updateDocument");
+
+    const response = await request(createTestApp(repository, createHighDemandGenerator(), learningRepository))
+      .post(`/api/learning/doc_1/${mode}`)
+      .set("x-test-user", "owner")
+      .expect(200);
+
+    expect(response.body).toMatchObject({ fallback: true, preserved: true, syncPending: false });
+    expect(response.body.document.flashcards).toEqual([{ front: "What does Gemini create?", back: "Study material." }]);
+    expect(updateDocument).not.toHaveBeenCalled();
+    const review = await learningRepository.getReview("owner", response.body.document);
+    expect(review.flashcards.map((card) => card.question)).toContain("What does Gemini create?");
+  });
+
   it("falls back to extractive study material for non-transient Gemini failures", async () => {
     const brokenGenerator: LearningGenerator = {
       ...generator,
@@ -716,7 +738,7 @@ describe("learningRouter", () => {
         throw new Error("Gemini credentials are not configured correctly.");
       })
     };
-    const app = createTestApp(repository, brokenGenerator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), brokenGenerator);
 
     const response = await request(app).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
 
@@ -731,7 +753,7 @@ describe("learningRouter", () => {
         throw Object.assign(new Error("The operation was aborted."), { name: "TimeoutError" });
       })
     };
-    const app = createTestApp(repository, timeoutGenerator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), timeoutGenerator);
 
     const response = await request(app)
       .post("/api/learning/doc_1/summary")
@@ -752,7 +774,7 @@ describe("learningRouter", () => {
       status: 503,
       headers: { "Content-Type": "application/json" }
     })));
-    const app = createTestApp(repository, generator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), generator);
 
     const response = await request(app)
       .post("/api/learning/doc_1/summary")
