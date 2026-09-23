@@ -217,6 +217,8 @@ assert_contains "${GCLOUD_CALLS}" "--tag ${CANDIDATE_TAG}"
 assert_not_contains "${GCLOUD_CALLS}" "update-traffic"
 assert_not_contains "${GCLOUD_CALLS}" "readmate-api-build-unrelated=100"
 assert_contains "${GCLOUD_CALLS}" "--remove-secrets=REVENUECAT_SECRET_API_KEY"
+assert_contains "${GCLOUD_CALLS}" "CARTESIA_API_KEY"
+assert_contains "${GCLOUD_CALLS}" "CARTESIA_VOICE_ID,CARTESIA_MODEL_ID"
 assert_not_contains "${GCLOUD_CALLS}" "REVENUECAT_SECRET_API_KEY=readmate-revenuecat-secret-api-key:latest"
 assert_not_contains "${GCLOUD_CALLS}" "REVENUECAT_ENTITLEMENT_ID=premium"
 
