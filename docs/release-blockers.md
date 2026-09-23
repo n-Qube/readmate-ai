@@ -38,6 +38,22 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Retire Cartesia infrastructure after the deploy.** Revoke the Cartesia API key, delete the `readmate-cartesia-api-key` Secret Manager entry, and confirm that the new Cloud Run revision no longer references `CARTESIA_*` values. The deploy scripts no longer set them.
 - **Test on real devices.** Gemini returns 24 kHz mono WAV, about 2.9 MB per minute. That is larger than Google MP3. Confirm iOS and Android playback, the lock screen, and Chromecast/AirPlay casting, and check mobile data use on long documents.
 
+### Production API promoted (2026-09-23)
+
+- **Live:** `readmate-api-build-cce38ba86f3627c7` (image `sha256:c51a73f4…d5916`) has 100% of traffic.
+- **Rollback target:** `readmate-api-hist-5eab4ffdfbe06477`.
+- **Migration:** `20260923120000_retire_cartesia_tts` was applied. It was the only pending migration of 25.
+- **Signed-in production check:** settings, entitlements, summary views, a document write and read, text-free progress saves, Google TTS, Gemini Lite with Google fallback, the Premium gate, and cleanup all passed.
+- **Not yet verifiable:** study packs and Ask AI currently fall back because the free-tier `gemini-2.5-flash` quota (20 requests/day) is exhausted. Both passed on the candidate before the quota ran out.
+- **Cartesia secret:** the live revision no longer mounts `readmate-cartesia-api-key`, so it can now be deleted in Secret Manager.
+
+### P0: the Gemini API key is on the Free Tier (found 2026-09-23)
+
+- Google's response: "Rate limit exceeded for model gemini-3.8-flash-lite-tts (**limit: 10 requests per day on Free Tier**)". The same key serves study packs and Ask AI, and `gemini-2.5-flash` is also limited to **20 requests/day** (`generate_content_free_tier_requests`).
+- **Owner action:** enable billing (a paid tier) for the Google AI Studio project that owns `readmate-gemini-api-key` at https://ai.dev/rate-limit, then set a budget alert. Do not offer Gemini voices publicly before this is done.
+- **Mitigation in code:** when Gemini TTS is rate limited, over quota, down, or unconfigured, `/api/tts` now answers with the default Google voice. It reports `X-ReadMate-TTS-Provider: google` and logs `tts_provider_fallback`, so playback never stops. Alert on that event, because a sustained rate means quota exhaustion.
+- **Production Clerk has no reviewer account.** `nii.nortey+readmate.playreview@gmail.com` does not exist in the production instance, which has 1 user. Create it before any App Store or Play review. It is referenced by the Play "Sign-in details" declaration.
+
 ### P0: iOS 1.0.2 rejected for crashing on launch (store review, 2026-09-23)
 
 - **What Apple saw.** On 2026-08-24, App Review rejected 1.0.2 build 133 under Guideline 2.1(a): "crashed on launch" on an iPhone 17 Pro Max and an iPad Air 11-inch (M3), both on iOS 26.6. The live App Store version is 1.0.1.
