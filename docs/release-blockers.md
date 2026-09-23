@@ -38,6 +38,25 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Retire Cartesia infrastructure after the deploy.** Revoke the Cartesia API key, delete the `readmate-cartesia-api-key` Secret Manager entry, and confirm that the new Cloud Run revision no longer references `CARTESIA_*` values. The deploy scripts no longer set them.
 - **Test on real devices.** Gemini returns 24 kHz mono WAV, about 2.9 MB per minute. That is larger than Google MP3. Confirm iOS and Android playback, the lock screen, and Chromecast/AirPlay casting, and check mobile data use on long documents.
 
+### P0: iOS 1.0.2 rejected for crashing on launch (store review, 2026-09-23)
+
+- **What Apple saw.** On 2026-08-24, App Review rejected 1.0.2 build 133 under Guideline 2.1(a): "crashed on launch" on an iPhone 17 Pro Max and an iPad Air 11-inch (M3), both on iOS 26.6. The live App Store version is 1.0.1.
+- **What the crash logs show.** In both logs, `RCTExceptionsManager reportFatal` leads to `abort()` on the TurboModule queue, **0.24 s after launch**. That is an uncaught JavaScript error at startup, turned fatal by release mode. The JS message is not in the `.ips` files, and the IPA for build 133 has expired from EAS, so its bundle cannot be inspected.
+- **Hypotheses ruled out.**
+  - Live Activities and widgets: loaded lazily and disabled (`ENABLE_IOS_LIVE_ACTIVITY = false`).
+  - RevenueCat: lazy and error-caught.
+  - A missing `EXPO_PUBLIC_READMATE_API_URL`: the export itself fails, so that build could never ship.
+- **Current code launches.** A Release build of this branch with production's public EAS variables (`APP_VARIANT=production`, Hermes) was installed on iOS 26.5 simulators. It stayed running and rendered onboarding on both an iPhone 17 and an iPad Air 11-inch (M3). This was built locally with Xcode 27 beta, while EAS uses Xcode 26.6.
+- **Build 146 is unverified.** It is attached to the 1.0.2 submission, but App Review's last message concerns build 133, and the page still offers "Resubmit to App Review". Build 146 was not built on EAS and has 0 TestFlight installs. **Do not resubmit 146 untested.**
+- **Path to resubmit.**
+  1. Deploy the API.
+  2. Build `store-internal` on EAS from this branch.
+  3. Install it from TestFlight on at least one iPhone and one iPad, with a cold launch and a signed-out first run.
+  4. Replace build 146 on the 1.0.2 version.
+  5. Resubmit with a note that the launch crash was fixed and verified on device.
+- **Found during the repro.** On iPad, the onboarding screen does not show the page dots or the Skip control that the iPhone shows.
+- **Play Console.** Production access needs 12+ opted-in testers for 14 days, and the Alpha closed-testing track has **no tester list attached** (0 opted in; 1 country; build 59). The **Foreground service permissions** declaration is overdue and blocks all app updates; the use is media playback. The other 10 App content declarations were completed on Jul 1–2. Review Data safety again for Gemini TTS and link sharing.
+
 ### P0: GitHub Actions cannot run
 
 - Every CI run on `n-Qube/readmate-ai` fails before starting: "The job was not started because your account is locked due to a billing issue." Resolve it in the GitHub billing settings for the account. Until then, run `npm ci && npm run verify:release` on a clean clone before merging. On 2026-09-23 this passed for PR #1.
