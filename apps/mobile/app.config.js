@@ -52,7 +52,8 @@ module.exports = ({ config }) => {
     }
   }
 
-  if (isNativeRelease) {
+  // Purchases are opt-in: a release only needs RevenueCat keys when it sells Premium.
+  if (isNativeRelease && process.env.EXPO_PUBLIC_PREMIUM_PURCHASES_ENABLED === "true") {
     const revenueCatAppleKey = process.env.EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY || "";
     const revenueCatGoogleKey = process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_API_KEY || "";
     if (!isRevenueCatSdkKey(revenueCatAppleKey, "appl_")) {

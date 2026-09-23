@@ -1,4 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
+import { canOfferPremiumUpgrade } from "@/purchases/purchases-availability";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouter } from "expo-router";
 import * as Linking from "expo-linking";
@@ -43,7 +44,9 @@ export default function MoreScreen() {
     {
       title: "ReadMate",
       items: [
-        { title: isPremium ? "Manage Premium" : "Upgrade to Premium", icon: "star.fill", onPress: () => router.push({ pathname: "/premium", params: { source: "more" } }) },
+        ...(isPremium || canOfferPremiumUpgrade(isPremium)
+          ? [{ title: isPremium ? "Manage Premium" : "Upgrade to Premium", icon: "star.fill" as const, onPress: () => router.push({ pathname: "/premium", params: { source: "more" } }) }]
+          : []),
         { title: "About ReadMate", icon: "info.circle", href: "/about" },
         { title: "Help & feedback", icon: "questionmark.circle", onPress: () => void Linking.openURL("mailto:support@readmate.ai?subject=ReadMate%20feedback") },
         { title: "Privacy", icon: "checkmark.circle.fill", onPress: () => router.push({ pathname: "/about", params: { section: "privacy" } }) }

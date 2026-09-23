@@ -1,4 +1,5 @@
 import { useAuth } from "@clerk/expo";
+import { canOfferPremiumUpgrade } from "@/purchases/purchases-availability";
 import { useQuery } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import { Link, useLocalSearchParams, useRouter } from "expo-router";
@@ -100,11 +101,16 @@ export default function SourcesScreen() {
           setFormError(`${message} Choose a smaller file and try again.`);
           Alert.alert("File too large", message);
         } else {
-          setFormError(`${message} Upgrade to ReadMate Premium for larger documents.`);
-          Alert.alert("Premium document", message, [
-            { text: "Not now", style: "cancel" },
-            { text: "View Premium", onPress: openPremium }
-          ]);
+          if (canOfferPremiumUpgrade(false)) {
+            setFormError(`${message} Upgrade to ReadMate Premium for larger documents.`);
+            Alert.alert("Premium document", message, [
+              { text: "Not now", style: "cancel" },
+              { text: "View Premium", onPress: openPremium }
+            ]);
+          } else {
+            setFormError(`${message} Choose a smaller file and try again.`);
+            Alert.alert("File too large", message);
+          }
         }
         return;
       }
@@ -122,7 +128,7 @@ export default function SourcesScreen() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not upload this document.";
       setFormError(message);
-      if (!entitlement?.isPremium && /premium|free plan limit|large document/i.test(message)) {
+      if (canOfferPremiumUpgrade(Boolean(entitlement?.isPremium)) && /premium|free plan limit|large document/i.test(message)) {
         Alert.alert("Premium document", message, [
           { text: "Not now", style: "cancel" },
           { text: "View Premium", onPress: openPremium }
@@ -161,7 +167,7 @@ export default function SourcesScreen() {
         notice={formNotice}
         noticeActionLabel={uploadedDocumentId ? "Open" : undefined}
         uploadLimitLabel={`${entitlement?.isPremium ? "Premium uploads" : "Free uploads"} up to ${formatBytes(uploadLimitBytes)}`}
-        showPremiumUpgrade={Boolean(entitlement && !entitlement.isPremium)}
+        showPremiumUpgrade={Boolean(entitlement) && canOfferPremiumUpgrade(Boolean(entitlement?.isPremium))}
         setQuery={(value) => {
           setFormError(null);
           setFormNotice(null);

@@ -17,6 +17,7 @@ import {
   restorePremiumPurchases
 } from "@/purchases/premium-purchases";
 import { screenshotMode } from "@/utils/screenshot-mode";
+import { premiumPurchasesEnabled } from "@/purchases/purchases-availability";
 
 type PremiumSource = "premium_audio" | "large_documents" | "account" | "more";
 
@@ -39,14 +40,14 @@ export default function PremiumScreen() {
   const storeStateQuery = useQuery({
     queryKey: ["premium-purchase-state", userId],
     queryFn: () => getPremiumPurchaseState(userId!, true),
-    enabled: Boolean(userId) && entitlementQuery.isSuccess && !isPremium,
+    enabled: premiumPurchasesEnabled && Boolean(userId) && entitlementQuery.isSuccess && !isPremium,
     retry: false
   });
   const activationNeedsSync = activationPending || storeStateQuery.data?.hasActiveStorePurchase === true;
   const offeringQuery = useQuery({
     queryKey: ["premium-offering", userId],
     queryFn: () => loadPremiumOffering(userId!),
-    enabled: Boolean(userId) && entitlementQuery.isSuccess && !isPremium && storeStateQuery.isSuccess && !activationNeedsSync,
+    enabled: premiumPurchasesEnabled && Boolean(userId) && entitlementQuery.isSuccess && !isPremium && storeStateQuery.isSuccess && !activationNeedsSync,
     retry: false
   });
   const packages = offeringQuery.data?.packages ?? [];
@@ -209,6 +210,11 @@ export default function PremiumScreen() {
           <Text selectable style={{ color: colors.red, fontSize: 13, lineHeight: 19 }}>{errorMessage(entitlementQuery.error)}</Text>
           <ActionButton label="Try again" tone="soft" onPress={() => void entitlementQuery.refetch()} />
         </SectionCard>
+      ) : !premiumPurchasesEnabled ? (
+        <SectionCard>
+          <Text selectable style={{ color: colors.ink, fontSize: 17, fontWeight: "800" }}>Premium isn't available to buy yet</Text>
+          <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Everything on your current plan keeps working, including Google and Gemini Lite voices, Twi, Ewe, and Ga listening, and study tools.</Text>
+        </SectionCard>
       ) : activationNeedsSync ? (
         <SectionCard elevated>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
@@ -328,6 +334,7 @@ function normalizeSource(value?: string): PremiumSource {
 
 function premiumSubtitle(source: PremiumSource, active: boolean): string {
   if (active) return "Premium audio, larger documents, and higher listening limits are available on this account.";
+  if (!premiumPurchasesEnabled) return "Premium upgrades will be available in a future update.";
   if (source === "premium_audio") return "Upgrade to unlock Gemini Flash studio-quality voices. Gemini Lite, Google, Twi, Ewe, and Ga audio remain available on Free.";
   if (source === "large_documents") return "Upgrade when a document is larger than the Free upload or PDF page limits.";
   return "Choose a plan from your app store. Prices below come directly from the store for your region.";

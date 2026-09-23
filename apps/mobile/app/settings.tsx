@@ -1,4 +1,5 @@
 import { useAuth, useReverification, useUser } from "@clerk/expo";
+import { canOfferPremiumUpgrade } from "@/purchases/purchases-availability";
 import { useQuery } from "@tanstack/react-query";
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
@@ -146,7 +147,7 @@ export default function SettingsScreen() {
           </View>
         </>
       ) : section === "account" ? (
-        <AccountCard user={user} plan={entitlementQuery.data?.plan} deletingAccount={deletingAccount} onManagePlan={() => router.push({ pathname: "/premium", params: { source: "account" } })} onSignOut={() => signOut()} onDelete={confirmAccountDeletion} />
+        <AccountCard user={user} plan={entitlementQuery.data?.plan} deletingAccount={deletingAccount} onManagePlan={isPremium || canOfferPremiumUpgrade(isPremium) ? () => router.push({ pathname: "/premium", params: { source: "account" } }) : undefined} onSignOut={() => signOut()} onDelete={confirmAccountDeletion} />
       ) : (
         <SettingsPanel section={section} settings={currentSettings} saving={saveSettings.isPending} isPremium={isPremium} previewingVoice={previewingVoice} onPreviewVoice={(language, voice) => void previewLocalVoice(language, voice)} onPremiumFeaturePress={() => router.push({ pathname: "/premium", params: { source: "premium_audio" } })} onChange={(next) => saveSettings.mutate(next)} />
       )}

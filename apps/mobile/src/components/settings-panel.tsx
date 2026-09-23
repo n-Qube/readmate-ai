@@ -13,6 +13,7 @@ import {
   providerLongLabel,
   TTS_PROVIDERS
 } from "@/config/tts-providers";
+import { canOfferPremiumUpgrade } from "@/purchases/purchases-availability";
 import type { ReadingDocument, UserSettings } from "@/types";
 
 const speeds = [0.75, 1, 1.25, 1.5, 2];
@@ -102,7 +103,8 @@ function ListeningSettings({ settings, voiceOptions, selectedVoice, voiceLabels,
         <>
           <SegmentedControl
             label="Reading voice quality"
-            options={[...TTS_PROVIDERS]}
+            // Hide Premium voices from Free accounts when the store cannot sell Premium.
+            options={TTS_PROVIDERS.filter((provider) => isPremium || !isPremiumProvider(provider) || canOfferPremiumUpgrade(Boolean(isPremium)))}
             value={settings.provider}
             onChange={(provider) => onChange({ ...settings, provider, voice: DEFAULT_VOICE_BY_PROVIDER[provider] })}
             shortLabels={{
@@ -113,7 +115,7 @@ function ListeningSettings({ settings, voiceOptions, selectedVoice, voiceLabels,
             disabledOptions={isPremium ? [] : TTS_PROVIDERS.filter(isPremiumProvider)}
             onDisabledPress={onPremiumFeaturePress}
           />
-          {!isPremium ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Google, Gemini Lite, Twi, Ewe, and Ga are available on Free. Gemini Flash studio-quality voices are a Premium feature.</Text> : null}
+          {canOfferPremiumUpgrade(Boolean(isPremium)) ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Google, Gemini Lite, Twi, Ewe, and Ga are available on Free. Gemini Flash studio-quality voices are a Premium feature.</Text> : null}
           {isGeminiProvider(settings.provider) ? <Text selectable style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>Gemini voices are AI-generated.</Text> : null}
           <SettingRow icon="speaker.wave.2.fill" tone="blue" label="Voice" value={voiceLabels[selectedVoice] ?? voiceShortLabel(selectedVoice)} />
           <SegmentedControl label="Choose voice" options={voiceOptions} value={selectedVoice} onChange={(voice) => onChange({ ...settings, voice })} shortLabels={voiceLabels} />
