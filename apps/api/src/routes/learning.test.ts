@@ -806,6 +806,18 @@ describe("learningRouter", () => {
     });
   });
 
+  it("returns the generated pack with syncPending instead of a 500 when review-row sync fails", async () => {
+    const learningRepository = createMemoryLearningRepository();
+    vi.spyOn(learningRepository, "syncGeneratedLearning").mockRejectedValue(Object.assign(new Error("Transaction already closed"), { name: "PrismaClientKnownRequestError", code: "P2028" }));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await request(createTestApp(repository, generator, learningRepository)).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+
+    expect(response.body).toMatchObject({ fallback: false, syncPending: true });
+    expect(response.body.document.summary).toBe("Detailed learning summary");
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('"code":"P2028"'));
+  });
+
   it("retries a temporary generated-study sync failure", async () => {
     const learningRepository = createMemoryLearningRepository();
     const originalSync = learningRepository.syncGeneratedLearning.bind(learningRepository);

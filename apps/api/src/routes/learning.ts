@@ -833,7 +833,12 @@ async function syncGeneratedLearningResiliently(
       await repository.syncGeneratedLearning(userId, documentId, learning);
       return true;
     } catch (error) {
-      if (!isDatabaseUnavailableError(error)) throw error;
+      if (!isDatabaseUnavailableError(error)) {
+        // The study material is already saved on the document and returned to
+        // the client; review rows reseed from it. Report pending, not a 500.
+        console.error(JSON.stringify({ event: "learning_sync_failed", documentId, name: error instanceof Error ? error.name : "UnknownError", code: prismaErrorCode(error) }));
+        return false;
+      }
       if (attempt < LEARNING_SYNC_MAX_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         continue;
@@ -849,6 +854,11 @@ async function syncGeneratedLearningResiliently(
 
 async function translateLearningText(text: string, targetLanguage: Exclude<TargetLanguage, "en">): Promise<string> {
   return (await translateEnglishToLocalLanguage(text, targetLanguage)).join(" ").trim() || text;
+}
+
+function prismaErrorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^P\d{4}$/.test(code) ? code : undefined;
 }
 
 function isRecoverableGeminiError(error: unknown): boolean {
@@ -1041,15 +1051,19 @@ export class PrismaLearningRepository implements LearningRepository {
       if (learning.flashcards) {
         const existingCards = await tx.learningFlashcard.findMany({ where: { userId, documentId, deletedAt: null } });
         const existingCardKeys = new Set<string>();
+        const newCards: Array<{ userId: string; documentId: string; question: string; answer: string; topicTag: string | undefined }> = [];
         for (const card of learning.flashcards) {
+          if (existingCardKeys.has(card.question)) continue;
           const existing = existingCards.find((item) => item.question === card.question);
           existingCardKeys.add(card.question);
           if (existing) {
             await tx.learningFlashcard.update({ where: { id: existing.id }, data: { answer: card.answer, topicTag } });
           } else {
-            await tx.learningFlashcard.create({ data: { userId, documentId, question: card.question, answer: card.answer, topicTag } });
+            newCards.push({ userId, documentId, question: card.question, answer: card.answer, topicTag });
           }
         }
+        // One insert for all new cards: every query also pays an RLS round trip.
+        if (newCards.length) await tx.learningFlashcard.createMany({ data: newCards });
         await tx.learningFlashcard.updateMany({
           where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingCardKeys] } } },
           data: { deletedAt: now }
@@ -1059,7 +1073,9 @@ export class PrismaLearningRepository implements LearningRepository {
       if (learning.quiz) {
         const existingQuestions = await tx.learningQuizQuestion.findMany({ where: { userId, documentId, deletedAt: null } });
         const existingQuestionKeys = new Set<string>();
+        const newQuestions: Array<{ userId: string; documentId: string; question: string; questionType: string; options: string; correctAnswer: string; explanation: string; topicTag: string | undefined }> = [];
         for (const quiz of learning.quiz) {
+          if (existingQuestionKeys.has(quiz.question)) continue;
           const existing = existingQuestions.find((item) => item.question === quiz.question);
           existingQuestionKeys.add(quiz.question);
           const data = {
@@ -1072,15 +1088,17 @@ export class PrismaLearningRepository implements LearningRepository {
           if (existing) {
             await tx.learningQuizQuestion.update({ where: { id: existing.id }, data });
           } else {
-            await tx.learningQuizQuestion.create({ data: { userId, documentId, question: quiz.question, ...data } });
+            newQuestions.push({ userId, documentId, question: quiz.question, ...data });
           }
         }
+        if (newQuestions.length) await tx.learningQuizQuestion.createMany({ data: newQuestions });
         await tx.learningQuizQuestion.updateMany({
           where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingQuestionKeys] } } },
           data: { deletedAt: now }
         });
       }
-    });
+    // Prisma's 5 s default is too short once each query pays an RLS round trip to Supabase.
+    }, { maxWait: 5_000, timeout: 20_000 });
   }
 
   async getReview(userId: string, document: ReadingDocumentResponse): Promise<LearningReviewResponse> {

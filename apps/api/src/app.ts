@@ -322,9 +322,12 @@ export function createApp() {
       res.status(503).json({ error: "ReadMate is temporarily busy. Please retry." });
       return;
     }
+    const code = (error as { code?: unknown } | null)?.code;
     console.error(JSON.stringify({
       event: "request_failed",
-      name: error instanceof Error ? error.name : "UnknownError"
+      name: error instanceof Error ? error.name : "UnknownError",
+      // Prisma error codes (for example P2028) identify the failure without user data.
+      code: typeof code === "string" && /^P\d{4}$/.test(code) ? code : undefined
     }));
     res.status(500).json({ error: "Unexpected server error." });
   });
