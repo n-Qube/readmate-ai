@@ -109,11 +109,11 @@ function Popup() {
             <Mic2 />
             Selection
           </button>
-          <button type="button" disabled title="Open the side panel to upload a PDF">
+          <button type="button" title="Upload a PDF in the side panel" disabled={openingPanel !== null} onClick={() => void openSidePanel("read")}>
             <FileText />
             PDF
           </button>
-          <button type="button" disabled title="Open the side panel to save to your library">
+          <button type="button" title="Save this page from the side panel" disabled={openingPanel !== null} onClick={() => void openSidePanel("read")}>
             <Library />
             Save
           </button>

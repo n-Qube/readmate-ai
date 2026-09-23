@@ -30,6 +30,19 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Retire Cartesia infrastructure after the deploy.** Revoke the Cartesia API key, delete the `readmate-cartesia-api-key` Secret Manager entry, and confirm that the new Cloud Run revision no longer references `CARTESIA_*` values. The deploy scripts no longer set them.
 - **Test on real devices.** Gemini returns 24 kHz mono WAV, about 2.9 MB per minute. That is larger than Google MP3. Confirm iOS and Android playback, the lock screen, and Chromecast/AirPlay casting, and check mobile data use on long documents.
 
+### P0: GitHub Actions cannot run
+
+- Every CI run on `n-Qube/readmate-ai` fails before starting: "The job was not started because your account is locked due to a billing issue." Resolve it in the GitHub billing settings for the account. Until then, run `npm ci && npm run verify:release` on a clean clone before merging. On 2026-09-23 this passed for PR #1.
+
+### P1: performance
+
+- **The mobile library downloads the full text of every document.** `GET /api/documents` returns up to 100 documents with every `ReadingBlock` (`documentInclude`). Mobile uses it for Home, Library, Study and WebMCP search, with a 30 s stale time. A Premium library of long PDFs can make each refresh many megabytes. The extension already uses the compact `GET /api/documents/library-page`. The fix needs playback changes: `playback-manager.tsx` builds segments from list items' `blocks`, and `playback-bar.tsx` only enables Play when they are present.
+  - Plan: switch the mobile list queries to `library-page`.
+  - Plan: have `selectDocument` or Play fetch `GET /api/documents/:id` before building segments.
+  - Plan: test playback, resume and lock-screen controls on real devices before release.
+- **`/api/learning/:id/flashcards` and `/quiz` each generate the whole study pack** (summary, key points, flashcards and quiz) and keep only one part. The extension calls them separately, so AI cost and latency are about three times what they need to be. Add a focused Gemini schema per mode.
+- **AI quota is charged before generation.** Users still spend quota when Gemini fails and the extractive fallback is served. Refund, or charge after success, once the usage bucket supports it.
+
 ### P1: product requirements gaps
 
 - **Share into ReadMate (mobile MVP).** Neither platform has an iOS share extension or an Android `SEND` intent. The PRD lists "Share URL into ReadMate" as a mobile MVP surface. Implementing it needs a config plugin and native builds.
@@ -46,6 +59,14 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Extension TTS disclosure.** The privacy card now names the provider that receives text on Play, as the PRD privacy requirement asks.
 - **Extension voice Preview button.** It had no click handler and was covered by the overlay `<select>`. It now plays a short sample.
 - **Extension premium provider.** Free accounts see Gemini Flash as locked instead of failing at playback.
+- **AI study packs were most likely failing into fallback.** On `gemini-2.5-flash`, thinking tokens shared the 8,192-token output cap, which truncated the JSON, and the call inherited the 15 s outbound timeout. Thinking is now off for 2.5 Flash, output is capped at 16,384 tokens, generation has its own 45 s deadline (`GEMINI_LEARNING_TIMEOUT_MS`), and truncated or blocked responses are logged explicitly. Fallback content no longer overwrites a saved study set (`preserved: true`). Both apps now tell users when material is quick notes rather than AI output. **Verify live:** generate a 24-card, 12-question pack on a long document and confirm `fallback: false`.
+- **Rate limits.** Content ingestion, uploads, sources, account deletion and all data routes are now per-user rate limited, not only TTS and learning. Limits are keyed through `getAuth()` rather than the deprecated `req.auth` proxy. `trust proxy` is set for Cloud Run, and 429 responses are JSON.
+- **Security.** Added nosniff, `X-Frame-Options: DENY`, `no-referrer`, a deny-by-default CSP, and HSTS in production. Removed `X-Powered-By`. The extension no longer treats a raw session token left by an older build as a signed-in session.
+- **UI dead-ends.**
+  - Mobile Library's ☰ button did nothing; it now cycles through sort orders.
+  - The "Documents" chip was truncated at 375 px; it now reads "Docs".
+  - Home's "…" button had no action; it was removed.
+  - The extension popup's PDF and Save buttons were permanently disabled; they now open the side panel.
 - **WebMCP.** Added Chrome's `consequentialHint` annotation: true for the three write tools, false for the read and listening tools. The six PRD tools, declarative forms without `toolautosubmit`, `respondWith`, abort-signal registration, redacted output envelopes, audit and idempotency, and the 40-case evaluation set were already present and match Chrome's current API.
 
 ## 2026-08-24 production-readiness gate

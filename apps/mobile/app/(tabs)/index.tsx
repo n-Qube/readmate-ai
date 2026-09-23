@@ -147,9 +147,6 @@ function ContinueRow({
       >
         <AppIcon name="play.fill" size={16} color={colors.player} weight="bold" />
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`More options for ${document.title}`} style={{ width: 24, height: 34, alignItems: "center", justifyContent: "center" }}>
-        <AppIcon name="ellipsis" size={20} color={colors.faint} />
-      </Pressable>
     </View>
   );
 }
