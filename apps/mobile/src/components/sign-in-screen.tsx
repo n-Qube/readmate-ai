@@ -16,9 +16,7 @@ type OtpAuthStep = "identifier" | "code";
 type OtpAuthFlow = "sign-in" | "sign-up";
 type OAuthProvider = "google" | "apple";
 
-// ReadMate's production Clerk instance intentionally uses email authentication
-// without the paid phone OTP feature. Keep phone OTP available for development
-// instances, where Clerk exposes it for testing.
+// Sign-in is code-only: a one-time code by email or SMS, or Google / Apple.
 const phoneOtpEnabled = isPhoneOtpEnabled(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
 const libraryIllustration = require("../../assets/onboarding/illustration-library.png");
 const highlights = ["Saved pages, PDFs, and feeds in one library", "Natural Gemini voices at your own pace", "Flashcards and quizzes from what you read"];
@@ -33,7 +31,6 @@ export function SignInScreen() {
   const centered = width >= 768;
   const wide = width >= 1024;
   const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<OtpAuthStep>("identifier");
   const [flow, setFlow] = useState<OtpAuthFlow>("sign-in");
@@ -70,7 +67,7 @@ export function SignInScreen() {
     const credential = parseAuthIdentifier(identifier, phoneOtpEnabled);
     if (!credential) {
       setError(phoneOtpEnabled
-        ? "Enter a valid email address or a phone number with country code, for example +1 555 123 4567."
+        ? "Enter a valid email address or phone number, for example 024 367 1964."
         : "Enter a valid email address.");
       return;
     }
@@ -120,36 +117,6 @@ export function SignInScreen() {
     }
   }
 
-  async function signInWithPassword() {
-    if (!signInState.isLoaded) return;
-    const credential = parseAuthIdentifier(identifier, phoneOtpEnabled);
-    const trimmedPassword = password.trim();
-    if (!credential) {
-      setError(phoneOtpEnabled ? "Enter the reviewer email address or phone number." : "Enter the reviewer email address.");
-      return;
-    }
-    if (!trimmedPassword) {
-      setError("Enter the account password.");
-      return;
-    }
-
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await signInState.signIn.create({ identifier: credential.value, password: trimmedPassword });
-      if (result.status === "complete" && result.createdSessionId) {
-        await signInState.setActive({ session: result.createdSessionId });
-        return;
-      }
-      setError("This account needs another verification step. Use one-time code, Google, or Apple sign-in.");
-    } catch (caught) {
-      setError(readClerkError(caught) ?? "Password sign-in could not be completed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function verifyOtpCode() {
     if (!signInState.isLoaded || !signUpState.isLoaded) return;
     const trimmedCode = code.trim();
@@ -180,8 +147,12 @@ export function SignInScreen() {
           await signUpState.setActive({ session: result.createdSessionId });
           return;
         }
+        if (result.status === "missing_requirements") {
+          setError("Your code was accepted, but the account couldn't be created. Please continue with Google or Apple, or contact support.");
+          return;
+        }
       }
-      setError("Could not complete phone verification. Please try again.");
+      setError("We couldn't verify that code. Please try again.");
     } catch (caught) {
       setError(readClerkError(caught) ?? "The code could not be verified.");
     } finally {
@@ -234,30 +205,18 @@ export function SignInScreen() {
                 <TextInput
                   value={identifier}
                   onChangeText={setIdentifier}
-                  placeholder={phoneOtpEnabled ? "Email or +1 555 123 4567" : "Email address"}
-                  keyboardType="email-address"
+                  placeholder={phoneOtpEnabled ? "Email or phone number" : "Email address"}
                   autoCapitalize="none"
-                  autoComplete="email"
+                  autoCorrect={false}
+                  autoComplete="username"
                   textContentType="username"
-                  editable={!busy}
-                  style={authInputStyle}
-                />
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Password"
-                  autoCapitalize="none"
-                  autoComplete="password"
-                  textContentType="password"
-                  secureTextEntry
+                  returnKeyType="send"
+                  onSubmitEditing={() => void sendOtpCode()}
                   editable={!busy}
                   style={authInputStyle}
                 />
                 <Pressable disabled={busy} onPress={sendOtpCode} style={authButtonStyle(!busy)}>
                   {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={authButtonTextStyle}>Send one-time code  ›</Text>}
-                </Pressable>
-                <Pressable disabled={busy} onPress={signInWithPassword} style={secondaryAuthButtonStyle(!busy)}>
-                  <Text style={secondaryAuthButtonTextStyle}>Sign in with password</Text>
                 </Pressable>
               </>
             ) : (
@@ -348,22 +307,6 @@ function authButtonStyle(enabled: boolean) {
 }
 
 const authButtonTextStyle = { color: "#ffffff", fontSize: 16, fontWeight: "900" as const };
-
-function secondaryAuthButtonStyle(enabled: boolean) {
-  return {
-    minHeight: 48,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    borderRadius: 999,
-    borderCurve: "continuous" as const,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    opacity: enabled ? 1 : 0.55
-  };
-}
-
-const secondaryAuthButtonTextStyle = { color: colors.ink, fontSize: 15, fontWeight: "800" as const };
 
 function readClerkError(error: unknown) {
   if (typeof error === "object" && error && "errors" in error) {
