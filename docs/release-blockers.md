@@ -49,6 +49,16 @@ Verified in a clean install outside iCloud with Node 22: `typecheck` passes for 
 - **Rollback targets:** `readmate-api-build-cce38ba86f3627c7`, then `readmate-api-hist-5eab4ffdfbe06477`.
 - **Cartesia secret:** keep `readmate-cartesia-api-key` until rollback is no longer needed, because every older revision still mounts it and would fail to start without it. Its value is the key revoked on 2026-09-23, so keeping it is harmless.
 
+### EAS release builds (2026-09-23/24)
+
+- **Android `store-internal` build 68 and iOS `store-internal` build 157 finished.** Neither is uploaded to Play or TestFlight yet. Upload them with `eas submit --profile store-internal` (internal and TestFlight only), then test on real devices before any store review.
+- **Fixes needed to get the iOS build through:**
+  - `eas-build-pre-install` ran before `npm install`, but `validate-public-ui.cjs` needs `typescript`. The validators now run in `eas-build-post-install`.
+  - On iOS, prebuild and pod install run before post-install, and prebuild names the project `ReadMate`. The validator now discovers the project name instead of hardcoding `ReadMateAI`.
+  - The Live Activity widget target had no provisioning profile and blocked non-interactive builds. Store profiles now omit it (`READMATE_DEVICE_BUILD_NO_WIDGET=1`), since Live Activities are disabled in code.
+  - Release builds no longer require RevenueCat keys unless `EXPO_PUBLIC_PREMIUM_PURCHASES_ENABLED=true`.
+- **Local EAS commands** evaluate `app.config.js` with `.env` loading disabled. Before `eas build`, export the public production variables: `eas env:pull --environment production --path .env.local`, then `set -a; . ./.env.local; set +a`.
+
 ### P0: the Gemini API key is on the Free Tier (found 2026-09-23)
 
 - Google's response: "Rate limit exceeded for model gemini-3.8-flash-lite-tts (**limit: 10 requests per day on Free Tier**)". The same key serves study packs and Ask AI, and `gemini-2.5-flash` is also limited to **20 requests/day** (`generate_content_free_tier_requests`).
