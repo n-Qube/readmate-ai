@@ -98,6 +98,9 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
   const playerRef = useRef<AudioPlayer | null>(null);
   const subscriptionRef = useRef<{ remove: () => void } | null>(null);
   const runIdRef = useRef(0);
+  // Bumped whenever the listener picks a document, so work that awaited the
+  // network for an earlier pick can tell it has been superseded.
+  const selectionIdRef = useRef(0);
   const finishedRef = useRef(false);
   const activeDocumentRef = useRef<ReadingDocument | undefined>(undefined);
   const activeBlockIndexRef = useRef(0);
@@ -227,7 +230,10 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
   }
 
   async function playDocument(requested: ReadingDocument, blockIndex?: number) {
+    const selectionId = ++selectionIdRef.current;
     await stop({ saveProgress: activeDocumentRef.current?.id !== requested.id });
+    // Another document was chosen while the previous one was saving.
+    if (selectionId !== selectionIdRef.current) return;
     let document = requested;
     if (needsFullDocument(requested)) {
       const runId = runIdRef.current;
@@ -244,7 +250,7 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
         return;
       }
       // Another document was chosen while this one was loading.
-      if (runId !== runIdRef.current) return;
+      if (runId !== runIdRef.current || selectionId !== selectionIdRef.current) return;
     }
     activeDocumentRef.current = document;
     setActiveDocument(document);
@@ -277,6 +283,7 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     // Preserve the previous article's progress before switching the global
     // selection, but make the new article immediately visible on every screen.
     if (!sameDocument) void saveCurrentProgress();
+    selectionIdRef.current += 1;
     runIdRef.current += 1;
     finishedRef.current = false;
     if (isRemoteOutputConnected()) sendOutputCommand("stop");
@@ -601,14 +608,19 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       sentenceIndex: Math.max(0, progress.sentenceIndex),
       percent: clamp(progress.percent, 0, 100)
     };
-    setProgressState(safeProgress);
+    const isActive = () => activeDocumentRef.current?.id === document.id;
+    if (isActive()) setProgressState(safeProgress);
     try {
       const updated = withKnownBlocks(await updateDocumentProgress(document.id, await getToken(), safeProgress), document);
       if (updated.blocks.length) queryClient.setQueryData(["document", document.id], updated);
       queryClient.setQueryData<ReadingDocument[]>(["documents"], (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item))
       );
-      setActiveDocument(updated);
+      // The listener may have moved to another article while this save was in
+      // flight; never switch the player back to the document being saved.
+      if (!isActive()) return;
+      activeDocumentRef.current = withKnownBlocks(updated, activeDocumentRef.current);
+      setActiveDocument(activeDocumentRef.current);
     } catch {
       // Playback should remain usable even if a progress sync write is temporarily unavailable.
     }
