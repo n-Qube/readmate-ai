@@ -8,7 +8,7 @@ import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, TextIn
 import { useState } from "react";
 import { AppIcon } from "@/components/app-icon";
 import { BrandLockup, SectionCard, colors, radius } from "@/components/mobile-design";
-import { isPhoneOtpEnabled, parseAuthIdentifier, type OtpAuthMethod } from "@/config/otp-policy";
+import { friendlyOtpSendError, isPhoneOtpEnabled, parseAuthIdentifier, type OtpAuthMethod } from "@/config/otp-policy";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -110,7 +110,7 @@ export function SignInScreen() {
         setStep("code");
         setMessage(`We sent a one-time code to your ${credential.type === "email" ? "email" : "phone"}.`);
       } catch (signUpError) {
-        setError(readClerkError(signUpError) ?? readClerkError(signInError) ?? "Could not send a verification code.");
+        setError(friendlyOtpSendError(credential.type, clerkErrorDetail(signUpError) ?? clerkErrorDetail(signInError)));
       }
     } finally {
       setBusy(false);
@@ -307,6 +307,14 @@ function authButtonStyle(enabled: boolean) {
 }
 
 const authButtonTextStyle = { color: "#ffffff", fontSize: 16, fontWeight: "900" as const };
+
+function clerkErrorDetail(error: unknown): { code?: string; message?: string } | null {
+  if (typeof error === "object" && error && "errors" in error) {
+    const first = (error as { errors?: Array<{ code?: string; longMessage?: string; message?: string }> }).errors?.[0];
+    return first ? { code: first.code, message: first.longMessage ?? first.message } : null;
+  }
+  return error instanceof Error ? { message: error.message } : null;
+}
 
 function readClerkError(error: unknown) {
   if (typeof error === "object" && error && "errors" in error) {

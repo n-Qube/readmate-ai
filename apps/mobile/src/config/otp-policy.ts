@@ -24,3 +24,15 @@ function normalizePhoneNumber(value: string) {
   if (!normalized.startsWith("+") || normalized.length < 8) return null;
   return normalized;
 }
+
+/**
+ * Clerk's developer-facing errors (for example when phone sign-in is not
+ * enabled on the instance) are not meant for listeners; translate the ones
+ * we can recognise and pass other messages through.
+ */
+export function friendlyOtpSendError(method: OtpAuthMethod, error: { code?: string; message?: string } | null): string {
+  if (!error) return "Could not send a verification code.";
+  const unsupportedPhone = error.code === "form_param_unknown" || /phone_number is not a valid parameter/i.test(error.message ?? "");
+  if (method === "phone" && unsupportedPhone) return "Phone sign-in isn't available yet. Use your email, Google, or Apple instead.";
+  return error.message || "Could not send a verification code.";
+}
