@@ -77,11 +77,13 @@ export async function cacheRemoteCoverImages(input: {
   mediaStorage: MediaStorage;
   storageKeySuffix?: string;
   requireCleanup?: boolean;
+  /** HTTPS-only syncs still use artwork, but never over or redirected to plain HTTP. */
+  requireHttps?: boolean;
 }): Promise<CachedCoverImages> {
   const baseKey = mediaBaseKey(input.userId, input.title, input.storageKeySuffix);
   if (input.imageUrl) {
     try {
-      const downloaded = await downloadImage(input.imageUrl, input.fetcher, input.lookup);
+      const downloaded = await downloadImage(input.imageUrl, input.fetcher, input.lookup, input.requireHttps ?? false);
       if (downloaded) {
         const cover = await sharp(downloaded)
           .rotate()
@@ -210,11 +212,12 @@ async function uploadCoverPair(input: {
   };
 }
 
-async function downloadImage(imageUrl: string, fetcher: typeof fetch, lookup?: HostLookup): Promise<Uint8Array | null> {
+async function downloadImage(imageUrl: string, fetcher: typeof fetch, lookup: HostLookup | undefined, requireHttps: boolean): Promise<Uint8Array | null> {
   try {
     const result = await safeRemoteFetch(imageUrl, {
       fetcher,
       lookup,
+      allowedProtocols: requireHttps ? ["https:"] : undefined,
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; ReadMateAI/1.0; +https://readmate.ai)",
         Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8"

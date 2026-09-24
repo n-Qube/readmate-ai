@@ -568,9 +568,10 @@ export async function saveRssFeed(input: {
       let coverImages;
       try {
         coverImages = await cacheRemoteCoverImages({
-          // HTTPS-only WebMCP sync avoids following untrusted image redirects;
-          // the deterministic branded fallback remains bounded to the five-item batch.
-          imageUrl: input.requireHttps ? undefined : item.imageUrl ?? article?.thumbnailUrl,
+          // HTTPS-only syncs (app and WebMCP sources, background refresh) still
+          // use the article's artwork, fetched without any plain-HTTP hop.
+          imageUrl: item.imageUrl ?? article?.thumbnailUrl,
+          requireHttps: input.requireHttps,
           userId: input.userId,
           title,
           sourceName: feedTitle,
