@@ -1,8 +1,12 @@
 export type OtpAuthMethod = "email" | "phone";
 
-/** Sign-in is code-only: email or phone number, plus Google and Apple. */
-export function isPhoneOtpEnabled(_publishableKey: string | undefined): boolean {
-  return true;
+/**
+ * Sign-in is code-only (email or phone), plus Google and Apple. Phone codes
+ * need Clerk Pro, so they stay off until the build sets
+ * EXPO_PUBLIC_PHONE_OTP_ENABLED=1.
+ */
+export function isPhoneOtpEnabled(flag: string | undefined): boolean {
+  return flag?.trim() === "1";
 }
 
 export function parseAuthIdentifier(

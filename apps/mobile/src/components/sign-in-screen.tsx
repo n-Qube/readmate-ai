@@ -17,7 +17,7 @@ type OtpAuthFlow = "sign-in" | "sign-up";
 type OAuthProvider = "google" | "apple";
 
 // Sign-in is code-only: a one-time code by email or SMS, or Google / Apple.
-const phoneOtpEnabled = isPhoneOtpEnabled(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const phoneOtpEnabled = isPhoneOtpEnabled(process.env.EXPO_PUBLIC_PHONE_OTP_ENABLED);
 const libraryIllustration = require("../../assets/onboarding/illustration-library.png");
 const highlights = ["Saved pages, PDFs, and feeds in one library", "Natural Gemini voices at your own pace", "Flashcards and quizzes from what you read"];
 

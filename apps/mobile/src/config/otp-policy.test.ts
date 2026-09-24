@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { friendlyOtpSendError, isPhoneOtpEnabled, parseAuthIdentifier } from "./otp-policy";
 
 describe("mobile and web OTP policy", () => {
-  it("offers phone codes for live and development Clerk builds", () => {
-    expect(isPhoneOtpEnabled("pk_live_example")).toBe(true);
-    expect(isPhoneOtpEnabled("pk_test_example")).toBe(true);
+  it("offers phone codes only when the build switches them on", () => {
+    expect(isPhoneOtpEnabled(undefined)).toBe(false);
+    expect(isPhoneOtpEnabled("0")).toBe(false);
+    expect(isPhoneOtpEnabled("1")).toBe(true);
   });
 
   it("normalizes email identifiers", () => {
