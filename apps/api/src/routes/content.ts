@@ -245,19 +245,19 @@ export function contentRouter(deps: ContentRouterDeps = {}): Router {
       const coverImages = await cacheRemoteCoverImages({
         imageUrl: article.thumbnailUrl,
         userId,
-        title: payload.title ?? article.title,
+        title: savedPageTitle(article.title, payload.title),
         sourceName: article.sourceName ?? source.sourceName,
         category: article.category,
         fetcher,
         lookup,
         mediaStorage
       });
-      const learning = learningDataForContent(payload.title ?? article.title, article.description, article.blocks);
+      const learning = learningDataForContent(savedPageTitle(article.title, payload.title), article.description, article.blocks);
       let document: ReadingDocumentResponse;
       try {
         if (action.kind === "execute") await accountDeletionGuard(userId);
         document = await documentRepository.createDocument(userId, {
-        title: payload.title ?? article.title,
+        title: savedPageTitle(article.title, payload.title),
         sourceType: payload.sourceType === "news" ? "news" : "webpage",
         sourceUrl: article.sourceUrl,
         canonicalUrl: article.canonicalUrl,
@@ -861,6 +861,21 @@ function isHttpsUrl(value: string | undefined): boolean {
   }
 }
 
+/** "Headline - Engadget" / "Headline | The Verge" -> "Headline"; a bare site name is kept. */
+function stripSiteSuffix(title: string, siteName: string | undefined): string {
+  const site = siteName?.trim();
+  if (!site || title.trim().toLowerCase() === site.toLowerCase()) return title;
+  return title.replace(new RegExp(`\\s+[-|\u2013\u2014\u00b7:]\\s+${escapeRegExp(site)}\\s*$`, "i"), "").trim() || title;
+}
+
+/**
+ * A saved page's own headline wins over a client-supplied title: older app
+ * builds sent the site name ("Engadget") as the title for every saved page.
+ */
+function savedPageTitle(articleTitle: string | undefined, clientTitle: string | undefined): string {
+  return articleTitle?.trim() ? articleTitle : clientTitle ?? articleTitle ?? "";
+}
+
 function extractMetadata(html: string, url: string) {
   const title =
     meta(html, "property", "og:title") ??
@@ -875,7 +890,7 @@ function extractMetadata(html: string, url: string) {
   const sourceName = meta(html, "property", "og:site_name") ?? sourceNameFromUrl(url);
   const articleHtml = matchFirst(html, /<article\b[^>]*>([\s\S]*?)<\/article>/i) ?? matchFirst(html, /<main\b[^>]*>([\s\S]*?)<\/main>/i);
   return {
-    title: stripHtml(title),
+    title: stripSiteSuffix(stripHtml(title), sourceName),
     description: description ? stripHtml(description) : undefined,
     canonicalUrl: canonicalUrl ? absolutizeUrl(canonicalUrl, url) : undefined,
     thumbnailUrl: absolutizeUrl(ogImage ?? twitterImage ?? structuredImage ?? bodyImage, url),
@@ -1387,4 +1402,4 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export const __contentInternals = { extractMetadata, attrValue };
+export const __contentInternals = { extractMetadata, attrValue, savedPageTitle };

@@ -57,7 +57,8 @@ export default function SourcesScreen() {
       const result = await saveUrl.mutateAsync({
         url: sourceUrl,
         sourceType: input.sourceType,
-        title: input.sourceType === "rss" ? `${input.suggestion.name} RSS feed` : input.suggestion.name,
+        // A saved page keeps its own headline; the site name only labels feeds.
+        title: input.sourceType === "rss" ? `${input.suggestion.name} RSS feed` : undefined,
         provider: currentSettings.provider,
         voice: currentSettings.voice,
         speed: currentSettings.speed
