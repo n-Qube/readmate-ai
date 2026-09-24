@@ -60,9 +60,14 @@ export function settingsForPlayerDeepLink(
 export function voiceForPlayerLanguage(
   provider: UserSettings["provider"],
   currentVoice: string,
-  targetLanguage: PlayerTargetLanguage
+  targetLanguage: PlayerTargetLanguage,
+  /** The listener's last English voice, restored when leaving Twi, Ewe, or Ga. */
+  rememberedEnglishVoice?: string
 ): string {
   if (voiceSupportsLanguage(provider, currentVoice, targetLanguage)) return currentVoice;
+  if (targetLanguage === "en" && rememberedEnglishVoice && voiceSupportsLanguage(provider, rememberedEnglishVoice, "en")) {
+    return rememberedEnglishVoice;
+  }
   return targetLanguage === "en"
     ? DEFAULT_VOICE_BY_PROVIDER[provider] ?? defaultEnglishVoice
     : defaultVoiceForLanguage(targetLanguage);

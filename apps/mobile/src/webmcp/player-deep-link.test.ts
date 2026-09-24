@@ -68,6 +68,13 @@ describe("WebMCP player deep links", () => {
     }));
   });
 
+  it("restores the listener's last English voice when leaving a local language", () => {
+    expect(voiceForPlayerLanguage("gemini-lite", "khaya:twi:male_low", "en", "Aoede")).toBe("Aoede");
+    // A remembered voice that the provider cannot speak falls back to its default.
+    expect(voiceForPlayerLanguage("google", "khaya:twi:male_low", "en", "Aoede")).toBe("en-US-Neural2-F");
+    expect(voiceForPlayerLanguage("gemini-lite", "khaya:twi:male_low", "en")).toBe("Kore");
+  });
+
   it("selects a matching local voice whenever the in-app language changes", () => {
     expect(voiceForPlayerLanguage("google", "khaya:gaa:female", "ee")).toBe("khaya:ewe:male_low");
     expect(voiceForPlayerLanguage("google", "khaya:ewe:female", "gaa")).toBe("khaya:gaa:male_low");

@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
   copyMask: { position: "absolute", left: 0, right: 0, top: "48%", height: "27%", backgroundColor: colors.bg, alignItems: "center", paddingHorizontal: 30, paddingTop: 18 },
   replacementTitle: { color: colors.ink, fontFamily: "Georgia", fontSize: 38, lineHeight: 43, fontWeight: "700", textAlign: "center" },
   replacementSubtitle: { color: colors.muted, marginTop: 18, fontSize: 18, lineHeight: 27, fontWeight: "500", textAlign: "center" },
-  voiceChoicesMask: { position: "absolute", left: 0, right: 0, top: "29%", height: "23%", backgroundColor: colors.bg, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  voiceChoicesMask: { position: "absolute", left: 0, right: 0, top: "22%", height: "30%", backgroundColor: colors.bg, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   voiceChoiceLine: { position: "absolute", left: 34, right: 34, bottom: 22, height: 2, backgroundColor: colors.teal },
   voiceChoiceRow: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   voiceChoice: { width: 86, height: 74, borderRadius: 16, borderWidth: 2, borderColor: "#c8c1b4", backgroundColor: "rgba(255,253,248,0.72)", alignItems: "center", justifyContent: "center" },
