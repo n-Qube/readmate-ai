@@ -158,7 +158,7 @@ IMMUTABLE_IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
-  --memory 512Mi \
+  --memory 2Gi \
   --cpu 1 \
   --concurrency 10 \
   --timeout 60 \
