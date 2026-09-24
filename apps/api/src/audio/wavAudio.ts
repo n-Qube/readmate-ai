@@ -104,12 +104,20 @@ function parseWav(buffer: Buffer): ParsedWav {
   let offset = 12;
   let formatChunk: Buffer | undefined;
   let data: Buffer | undefined;
+  let streamedData = false;
 
   while (offset + 8 <= buffer.length) {
     const id = buffer.toString("ascii", offset, offset + 4);
     const size = buffer.readUInt32LE(offset + 4);
     const start = offset + 8;
     const end = start + size;
+    if (end > buffer.length && id === "data") {
+      // Streaming providers (Khaya) write the header before the length is
+      // known, so the data chunk runs to the end of what was received.
+      data = buffer.subarray(start);
+      streamedData = true;
+      break;
+    }
     if (end > buffer.length) throw new Error("Speech provider returned a truncated WAV audio file.");
     if (id === "fmt ") formatChunk = buffer.subarray(start, end);
     if (id === "data") data = buffer.subarray(start, end);
@@ -124,7 +132,8 @@ function parseWav(buffer: Buffer): ParsedWav {
     throw new Error(`Unsupported WAV audio format ${audioFormat}.`);
   }
   const blockAlign = formatChunk.readUInt16LE(12);
-  if (!blockAlign || data.length % blockAlign !== 0) {
+  if (blockAlign && streamedData) data = data.subarray(0, data.length - (data.length % blockAlign));
+  if (!blockAlign || data.length % blockAlign !== 0 || (streamedData && !data.length)) {
     throw new Error("Speech provider returned malformed WAV sample data.");
   }
 
