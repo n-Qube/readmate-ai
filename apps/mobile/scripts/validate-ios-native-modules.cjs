@@ -49,7 +49,14 @@ const sceneChecks = [
 ];
 
 const iosProjectRoot = path.join(projectRoot, "ios");
-if (fs.existsSync(iosProjectRoot)) {
+// EAS regenerates ios/ from app config (continuous native generation). A
+// folder with no Xcode project or Podfile is not a generated project yet, so
+// only the config-plugin checks apply; a real project must be complete.
+const hasGeneratedProject = fs.existsSync(xcodeProjectPath) || fs.existsSync(path.join(iosProjectRoot, "Podfile"));
+if (fs.existsSync(iosProjectRoot) && !hasGeneratedProject) {
+  console.log(`ios/ has no generated project yet (${fs.readdirSync(iosProjectRoot).join(", ") || "empty"}); EAS prebuild will regenerate it.`);
+}
+if (hasGeneratedProject) {
   const generatedNativeFiles = [appDelegatePath, infoPlistPath, xcodeProjectPath];
   const missingNativeFiles = generatedNativeFiles.filter((file) => !fs.existsSync(file));
   if (missingNativeFiles.length > 0) {
