@@ -128,7 +128,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen bottomNavigation="/(tabs)/more">
+    <Screen narrow bottomNavigation="/(tabs)/more">
       <NavBackButton label="Close settings and go back" onPress={closeSettings} />
       <PageHeader
         eyebrow={section ? "Settings" : "Profile, voice, sync, billing"}

@@ -37,6 +37,7 @@ export default function HomeScreen() {
   return (
     <Screen
       bottomNavigation="/(tabs)"
+      narrow
       contentContainerStyle={{ gap: isTablet ? 28 : 12 }}
       refreshControl={<RefreshControl refreshing={documentsQuery.isRefetching} onRefresh={() => void documentsQuery.refetch()} />}
     >
@@ -50,7 +51,7 @@ export default function HomeScreen() {
         </Text>
       </View>
 
-      <View style={{ width: "100%", maxWidth: isTablet ? 650 : undefined, alignSelf: "center" }}>
+      <View style={{ width: "100%", alignSelf: "center" }}>
         <PlaybackBar
           document={activeDocument}
           queue={documents}

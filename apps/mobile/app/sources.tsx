@@ -138,7 +138,7 @@ export default function SourcesScreen() {
   }
 
   return (
-    <Screen bottomNavigation="/(tabs)/more">
+    <Screen narrow bottomNavigation="/(tabs)/more">
       <EditorialHero
         eyebrow="Add anything to your library"
         title="Add content"

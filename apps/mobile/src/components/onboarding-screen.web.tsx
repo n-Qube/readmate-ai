@@ -2,22 +2,25 @@ import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { BrandLockup, colors, radius, shadows } from "@/components/mobile-design";
 
-const referenceScreen1 = require("../../assets/onboarding/reference-screen-1.png");
-const referenceScreen2 = require("../../assets/onboarding/reference-screen-2.png");
+// Illustrations cropped from the phone onboarding art. The full phone
+// screenshots carry their own headline, dots, and Skip, which duplicated
+// this page's controls on desktop.
+const captureIllustration = require("../../assets/onboarding/illustration-capture.png");
+const libraryIllustration = require("../../assets/onboarding/illustration-library.png");
 
 const steps = [
   {
-    image: referenceScreen1,
+    image: captureIllustration,
     title: "Turn anything into listening.",
     subtitle: "Save an article, then press play. ReadMate keeps the experience calm, focused, and easy to return to."
   },
   {
-    image: referenceScreen2,
+    image: libraryIllustration,
     title: "Your reading, in motion.",
     subtitle: "Keep articles, PDFs, and feeds together, then carry your listening progress across every screen."
   },
   {
-    image: referenceScreen2,
+    image: captureIllustration,
     title: "Your pace, your way.",
     subtitle: "Choose a voice, set your speed, and listen in English, Twi, Ewe, or Ga."
   }
@@ -147,7 +150,7 @@ export function FirstRunOnboarding({ onComplete }: { onComplete: (options?: { sh
                 accessible={false}
                 source={step.image}
                 resizeMode="contain"
-                style={[styles.referenceImage, { top: compact ? -185 : -280 }]}
+                style={styles.illustration}
               />
               <View pointerEvents="none" style={styles.artFrame} />
             </View>
@@ -383,6 +386,8 @@ const styles = StyleSheet.create({
     flex: 1.08,
     minWidth: 0,
     minHeight: 430,
+    alignItems: "center",
+    justifyContent: "center",
     overflow: "hidden",
     borderRadius: 24,
     borderCurve: "continuous",
@@ -397,12 +402,10 @@ const styles = StyleSheet.create({
     minHeight: 260,
     maxHeight: 280
   },
-  referenceImage: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    width: "100%",
-    aspectRatio: 853 / 1844
+  illustration: {
+    width: "88%",
+    maxWidth: 560,
+    aspectRatio: 800 / 330
   },
   artFrame: {
     ...StyleSheet.absoluteFill,

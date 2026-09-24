@@ -13,6 +13,7 @@ import { ApiError } from "@/api/client";
 import { isUsableClerkPublishableKey } from "@/config/clerk-publishable-key";
 import { clearPremiumPurchasesIdentity, initializePremiumPurchases } from "@/purchases/premium-purchases";
 import { AgentActionProvider } from "@/webmcp/agent-action-provider";
+import { DocumentTitle } from "@/components/document-title";
 import { SharedContentHandler, ShareIntentRoot } from "@/share/share-intent-root";
 
 if (screenshotMode) {
@@ -78,6 +79,7 @@ function PrincipalScopedApp() {
     <QueryClientProvider client={queryClient} key={principalKey}>
       <PlaybackManagerProvider key={principalKey}>
         <AgentActionProvider>
+          <DocumentTitle title="ReadMate" />
           <StatusBar style="auto" />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />

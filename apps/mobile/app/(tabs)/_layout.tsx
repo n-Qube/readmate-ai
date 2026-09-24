@@ -3,10 +3,12 @@ import { Redirect, Tabs } from "expo-router";
 import { ActivityIndicator, View, type ColorValue } from "react-native";
 import { AppIcon, type AppIconName } from "@/components/app-icon";
 import { colors } from "@/components/mobile-design";
+import { useApplySetupPreferences } from "@/setup/use-apply-setup-preferences";
 import { screenshotMode } from "@/utils/screenshot-mode";
 
 export default function TabLayout() {
   const { isLoaded, isSignedIn } = useAuth();
+  useApplySetupPreferences(!screenshotMode && isLoaded && Boolean(isSignedIn));
 
   if (!screenshotMode && !isLoaded) {
     return (

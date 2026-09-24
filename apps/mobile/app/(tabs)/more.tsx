@@ -55,7 +55,7 @@ export default function MoreScreen() {
   ];
 
   return (
-    <Screen bottomNavigation="/(tabs)/more" contentContainerStyle={{ gap: 22 }}>
+    <Screen narrow bottomNavigation="/(tabs)/more" contentContainerStyle={{ gap: 22 }}>
       <View style={{ gap: 20 }}>
         <BrandLockup large />
         <View style={{ gap: 7 }}>

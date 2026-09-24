@@ -1,11 +1,13 @@
 import { useOAuth } from "@clerk/expo";
 import { useSignInWithApple } from "@clerk/expo/apple";
 import { useSignIn, useSignUp } from "@clerk/expo/legacy";
+import { router } from "expo-router";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
-import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useState } from "react";
-import { BrandLockup, SectionCard, colors } from "@/components/mobile-design";
+import { AppIcon } from "@/components/app-icon";
+import { BrandLockup, SectionCard, colors, radius } from "@/components/mobile-design";
 import { isPhoneOtpEnabled, parseAuthIdentifier, type OtpAuthMethod } from "@/config/otp-policy";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -18,6 +20,8 @@ type OAuthProvider = "google" | "apple";
 // without the paid phone OTP feature. Keep phone OTP available for development
 // instances, where Clerk exposes it for testing.
 const phoneOtpEnabled = isPhoneOtpEnabled(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const libraryIllustration = require("../../assets/onboarding/illustration-library.png");
+const highlights = ["Saved pages, PDFs, and feeds in one library", "Natural Gemini voices at your own pace", "Flashcards and quizzes from what you read"];
 
 export function SignInScreen() {
   const googleOAuth = useOAuth({ strategy: "oauth_google" });
@@ -25,6 +29,9 @@ export function SignInScreen() {
   const { startAppleAuthenticationFlow } = useSignInWithApple();
   const signInState = useSignIn();
   const signUpState = useSignUp();
+  const { width } = useWindowDimensions();
+  const centered = width >= 768;
+  const wide = width >= 1024;
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -183,111 +190,137 @@ export function SignInScreen() {
   }
 
   return (
-    <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ flexGrow: 1, padding: 24, gap: 18, backgroundColor: colors.bg }}>
-      <View style={{ gap: 18, paddingTop: 18 }}>
-        <BrandLockup large />
-        <View style={{ gap: 8 }}>
-          <Text selectable style={{ fontSize: 30, lineHeight: 33, fontWeight: "800", color: colors.ink, letterSpacing: 0 }}>
-            Listen everywhere you read
-          </Text>
-          <Text selectable style={{ fontSize: 14, lineHeight: 22, color: colors.muted }}>
-            Sign in to sync saved pages, PDFs, feeds, reading progress, and voice preferences.
-          </Text>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={{ flexGrow: 1, justifyContent: centered ? "center" : "flex-start", padding: wide ? 48 : 24, backgroundColor: colors.bg }}
+    >
+      <View style={{ width: "100%", maxWidth: wide ? 1040 : 440, alignSelf: "center", flexDirection: wide ? "row" : "column", alignItems: wide ? "center" : "stretch", gap: wide ? 72 : 18 }}>
+        <View style={{ flex: wide ? 1 : undefined, gap: wide ? 24 : 18, paddingTop: wide ? 0 : 18 }}>
+          <BrandLockup large />
+          <View style={{ gap: wide ? 12 : 8 }}>
+            <Text accessibilityRole="header" selectable style={{ fontFamily: "Georgia", fontSize: wide ? 46 : 32, lineHeight: wide ? 52 : 36, fontWeight: "700", color: colors.ink, letterSpacing: -0.6 }}>
+              Listen everywhere you read
+            </Text>
+            <Text selectable style={{ fontSize: wide ? 17 : 14.5, lineHeight: wide ? 27 : 22, color: colors.muted }}>
+              Sign in to sync saved pages, PDFs, feeds, reading progress, and voice preferences.
+            </Text>
+          </View>
+          {wide ? (
+            <>
+              <View style={{ gap: 12 }}>
+                {highlights.map((item) => (
+                  <View key={item} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <AppIcon name="checkmark.circle.fill" size={18} color={colors.blue} />
+                    <Text style={{ color: colors.text, fontSize: 15, lineHeight: 22 }}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+              <Image source={libraryIllustration} resizeMode="contain" accessibilityIgnoresInvertColors style={{ width: "100%", maxWidth: 520, aspectRatio: 800 / 330, borderRadius: radius.xl }} />
+            </>
+          ) : null}
         </View>
-      </View>
 
-      <SectionCard elevated>
-        <View style={{ gap: 5 }}>
-          <Text selectable style={{ color: colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 0, textTransform: "uppercase" }}>
-            {phoneOtpEnabled ? "Email or phone" : "Email"}
-          </Text>
-        </View>
-        {step === "identifier" ? (
-          <>
-            <TextInput
-              value={identifier}
-              onChangeText={setIdentifier}
-              placeholder={phoneOtpEnabled ? "Email or +1 555 123 4567" : "Email address"}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              textContentType="username"
-              editable={!busy}
-              style={authInputStyle}
-            />
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              autoCapitalize="none"
-              autoComplete="password"
-              textContentType="password"
-              secureTextEntry
-              editable={!busy}
-              style={authInputStyle}
-            />
-            <Pressable disabled={busy} onPress={sendOtpCode} style={authButtonStyle(!busy)}>
-              {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={authButtonTextStyle}>Send one-time code  ›</Text>}
-            </Pressable>
-            <Pressable disabled={busy} onPress={signInWithPassword} style={secondaryAuthButtonStyle(!busy)}>
-              <Text style={secondaryAuthButtonTextStyle}>Sign in with password</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <TextInput
-              value={code}
-              onChangeText={setCode}
-              placeholder="Enter code"
-              keyboardType="number-pad"
-              autoComplete="sms-otp"
-              textContentType="oneTimeCode"
-              editable={!busy}
-              style={authInputStyle}
-            />
-            <Pressable disabled={busy} onPress={verifyOtpCode} style={authButtonStyle(!busy)}>
-              {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={authButtonTextStyle}>Verify and continue</Text>}
-            </Pressable>
-            <Pressable
-              disabled={busy}
-              onPress={() => {
-                setStep("identifier");
-                setCode("");
-                setMessage(null);
-                setError(null);
-              }}
-              style={{ minHeight: 42, alignItems: "center", justifyContent: "center" }}
-            >
-              <Text style={{ color: "#2563eb", fontWeight: "900" }}>
-                {phoneOtpEnabled ? "Use a different email or phone" : "Use a different email"}
+        <View style={{ width: wide ? 420 : "100%", gap: 18 }}>
+          <SectionCard elevated>
+            <View style={{ gap: 5 }}>
+              <Text selectable style={{ color: colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 0, textTransform: "uppercase" }}>
+                {phoneOtpEnabled ? "Email or phone" : "Email"}
               </Text>
+            </View>
+            {step === "identifier" ? (
+              <>
+                <TextInput
+                  value={identifier}
+                  onChangeText={setIdentifier}
+                  placeholder={phoneOtpEnabled ? "Email or +1 555 123 4567" : "Email address"}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  textContentType="username"
+                  editable={!busy}
+                  style={authInputStyle}
+                />
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Password"
+                  autoCapitalize="none"
+                  autoComplete="password"
+                  textContentType="password"
+                  secureTextEntry
+                  editable={!busy}
+                  style={authInputStyle}
+                />
+                <Pressable disabled={busy} onPress={sendOtpCode} style={authButtonStyle(!busy)}>
+                  {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={authButtonTextStyle}>Send one-time code  ›</Text>}
+                </Pressable>
+                <Pressable disabled={busy} onPress={signInWithPassword} style={secondaryAuthButtonStyle(!busy)}>
+                  <Text style={secondaryAuthButtonTextStyle}>Sign in with password</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <TextInput
+                  value={code}
+                  onChangeText={setCode}
+                  placeholder="Enter code"
+                  keyboardType="number-pad"
+                  autoComplete="sms-otp"
+                  textContentType="oneTimeCode"
+                  editable={!busy}
+                  style={authInputStyle}
+                />
+                <Pressable disabled={busy} onPress={verifyOtpCode} style={authButtonStyle(!busy)}>
+                  {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={authButtonTextStyle}>Verify and continue</Text>}
+                </Pressable>
+                <Pressable
+                  disabled={busy}
+                  onPress={() => {
+                    setStep("identifier");
+                    setCode("");
+                    setMessage(null);
+                    setError(null);
+                  }}
+                  style={{ minHeight: 42, alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#2563eb", fontWeight: "900" }}>
+                    {phoneOtpEnabled ? "Use a different email or phone" : "Use a different email"}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+            {message ? <Text selectable style={{ color: colors.green, fontSize: 14, lineHeight: 20 }}>{message}</Text> : null}
+            {error ? <Text selectable style={{ color: colors.red, fontSize: 14, lineHeight: 20 }}>{error}</Text> : null}
+          </SectionCard>
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+            <Text selectable style={{ color: colors.faint, fontSize: 11, fontWeight: "700", letterSpacing: 0 }}>
+              OR CONTINUE WITH
+            </Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+          </View>
+
+          <View style={{ gap: 10 }}>
+            <Pressable disabled={Boolean(oauthBusy)} onPress={() => signInWith("google")} style={{ minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 999, borderCurve: "continuous", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, opacity: oauthBusy && oauthBusy !== "google" ? 0.55 : 1 }}>
+              {oauthBusy === "google" ? <ActivityIndicator color={colors.ink} /> : <Text style={{ color: colors.ink, fontSize: 14, fontWeight: "700" }}>Continue with Google</Text>}
             </Pressable>
-          </>
-        )}
-        {message ? <Text selectable style={{ color: colors.green, fontSize: 14, lineHeight: 20 }}>{message}</Text> : null}
-        {error ? <Text selectable style={{ color: colors.red, fontSize: 14, lineHeight: 20 }}>{error}</Text> : null}
-      </SectionCard>
+            <Pressable disabled={Boolean(oauthBusy)} onPress={() => signInWith("apple")} style={{ minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 999, borderCurve: "continuous", backgroundColor: colors.text, opacity: oauthBusy && oauthBusy !== "apple" ? 0.55 : 1 }}>
+              {oauthBusy === "apple" ? <ActivityIndicator color="#ffffff" /> : <Text style={{ color: "#ffffff", fontSize: 14, fontWeight: "700" }}>Continue with Apple</Text>}
+            </Pressable>
+          </View>
 
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
-        <Text selectable style={{ color: colors.faint, fontSize: 11, fontWeight: "700", letterSpacing: 0 }}>
-          OR CONTINUE WITH
-        </Text>
-        <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+          <Text selectable style={{ textAlign: "center", color: colors.faint, fontSize: 13, lineHeight: 19 }}>
+            By continuing you agree to our Terms and{" "}
+            <Text accessibilityRole="link" onPress={() => router.push({ pathname: "/about", params: { section: "privacy" } })} style={{ color: colors.muted, textDecorationLine: "underline" }}>
+              Privacy Policy
+            </Text>
+            .
+          </Text>
+        </View>
       </View>
-
-      <View style={{ gap: 10 }}>
-        <Pressable disabled={Boolean(oauthBusy)} onPress={() => signInWith("google")} style={{ minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 999, borderCurve: "continuous", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, opacity: oauthBusy && oauthBusy !== "google" ? 0.55 : 1 }}>
-          {oauthBusy === "google" ? <ActivityIndicator color={colors.ink} /> : <Text style={{ color: colors.ink, fontSize: 14, fontWeight: "700" }}>Continue with Google</Text>}
-        </Pressable>
-        <Pressable disabled={Boolean(oauthBusy)} onPress={() => signInWith("apple")} style={{ minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 999, borderCurve: "continuous", backgroundColor: colors.text, opacity: oauthBusy && oauthBusy !== "apple" ? 0.55 : 1 }}>
-          {oauthBusy === "apple" ? <ActivityIndicator color="#ffffff" /> : <Text style={{ color: "#ffffff", fontSize: 14, fontWeight: "700" }}>Continue with Apple</Text>}
-        </Pressable>
-      </View>
-
-      <Text selectable style={{ textAlign: "center", color: colors.faint, fontSize: 13, lineHeight: 19 }}>
-        By continuing you agree to our Terms and Privacy Policy.
-      </Text>
     </ScrollView>
   );
 }
