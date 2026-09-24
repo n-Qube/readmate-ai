@@ -6,6 +6,7 @@ import { Platform } from "react-native";
 import { ApiError } from "@/api/client";
 import { createSpeechAudioFile, createSpeechCastUrl, getDocument, getUserSettings, updateDocumentProgress } from "@/api/documents";
 import { needsFullDocument, withKnownBlocks } from "@/utils/document-blocks";
+import { playbackErrorMessage } from "@/playback/playback-error";
 import { addOutputStateListener, loadOutputMedia, sendOutputCommand, showOutputPicker as presentOutputPicker, type OutputMedia, type OutputState } from "@/native/output";
 import { AI_AUDIO_DISCLOSURE_TITLE, aiAudioMetadataSubtitle } from "@/playback/ai-audio-disclosure";
 import { endPlaybackLiveActivity, updatePlaybackLiveActivity } from "@/playback/live-activity";
@@ -155,6 +156,13 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       setError(null);
       setState("ready");
       syncPlaybackLiveActivity(document, progressRef.current, "ready", 0, 0);
+      return;
+    }
+    if (state === "error" || state === "completed") {
+      // A failure or finished run belongs to the previous voice or language;
+      // don't show "Twi audio needs attention" after switching to English.
+      setError(null);
+      setState("ready");
     }
   }, [settingsQuery.data?.provider, settingsQuery.data?.voice, settingsQuery.data?.speed, settingsQuery.data?.targetLanguage]);
 
@@ -991,19 +999,3 @@ function audioSettingsChanged(previous: PlaybackAudioSettings, next: PlaybackAud
   return previous.provider !== next.provider || previous.voice !== next.voice || previous.speed !== next.speed || previous.targetLanguage !== next.targetLanguage;
 }
 
-function playbackErrorMessage(caught: unknown): string {
-  const message = caught instanceof Error ? caught.message : "";
-  if (caught instanceof ApiError && [502, 503, 504].includes(caught.status)) {
-    return "ReadMate audio is temporarily busy. Tap play to retry in a moment.";
-  }
-  if (/sentences? that are too long|content is too long|input.*too long|maximum.*(bytes|characters)|SSML sentence/i.test(message)) {
-    return "This section was too long to prepare. Tap play to retry it in smaller parts.";
-  }
-  if (/credentials are not configured|GOOGLE_TTS_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_SERVICE_ACCOUNT_JSON|quota|billing/i.test(message)) {
-    return "Google voice is temporarily unavailable. Try again in a moment.";
-  }
-  if (/401|403|unauthorized|forbidden|session|token/i.test(message)) {
-    return "Your reading session needs to be refreshed. Open Settings, sign in again, then try playback.";
-  }
-  return message || "Could not start playback.";
-}
