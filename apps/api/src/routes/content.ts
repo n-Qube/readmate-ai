@@ -509,7 +509,8 @@ export async function saveRssFeed(input: {
     if (!hasReadableBody(itemText)) continue;
     requireDocumentWithinPlan(input.entitlement, { textCharacters: textCharacterCount(itemText) });
     const category = article?.category ?? categoryForText([item.title, item.description].join(" "));
-    const title = article?.title ?? item.title;
+    // The feed's own headline is clean; page titles often carry " - Site Name".
+    const title = item.title && item.title !== "Untitled feed item" ? item.title : article?.title ?? item.title;
     const canonicalUrl = normalizeArticleUrl(article?.canonicalUrl ?? normalizedItemLink);
     const sourceUrl = normalizedItemLink ?? canonicalUrl;
     const dedupeKey = rssDedupeKey({ feedUrl: resolved.feedUrl, guid: item.guid, link: sourceUrl, canonicalUrl, title, publishedAt: item.publishedAt });
@@ -1127,7 +1128,7 @@ function knownSource(input: string) {
 }
 
 function meta(html: string, attrName: "name" | "property", attrValueText: string): string | undefined {
-  const pattern = new RegExp(`<meta\\b(?=[^>]*\\b${attrName}=["']${escapeRegExp(attrValueText)}["'])(?=[^>]*\\bcontent=["'][^"']+["'])[^>]*>`, "i");
+  const pattern = new RegExp(`<meta\\b(?=[^>]*\\b${attrName}=["']${escapeRegExp(attrValueText)}["'])(?=[^>]*\\bcontent=(?:"[^"]+"|'[^']+'))[^>]*>`, "i");
   const tag = matchWhole(html, pattern);
   return tag ? decodeHtml(attrValue(tag, "content") ?? "") : undefined;
 }
@@ -1164,8 +1165,10 @@ function matchWhole(value: string, pattern: RegExp): string | undefined {
 }
 
 function attrValue(tag: string, name: string): string | undefined {
-  const match = tag.match(new RegExp(`\\b${escapeRegExp(name)}=["']([^"']+)["']`, "i"));
-  return match ? decodeHtml(match[1]) : undefined;
+  // Read up to the matching quote so values like content="Pixel 11's ..." stay whole.
+  const match = tag.match(new RegExp(`\\b${escapeRegExp(name)}=(?:"([^"]+)"|'([^']+)')`, "i"));
+  const value = match?.[1] ?? match?.[2];
+  return value ? decodeHtml(value) : undefined;
 }
 
 function stripHtml(value: string): string {
@@ -1383,3 +1386,5 @@ function normalizeArticlesPerFeed(value: number | undefined): number {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+export const __contentInternals = { extractMetadata, attrValue };
