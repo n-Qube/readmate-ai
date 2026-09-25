@@ -3,7 +3,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentRepository } from "./documents.js";
 import type { AuthedRequest } from "../auth.js";
-import { UploadQuotaError, uploadsRouter, type UploadRecordResponse, type UploadRepository, type UploadStorage } from "./uploads.js";
+import { DownloadLimitExceededError, UploadQuotaError, uploadsRouter, type UploadRecordResponse, type UploadRepository, type UploadStorage } from "./uploads.js";
 import type { WorkLimiter } from "../workLimiter.js";
 
 function createTestApp(repository: UploadRepository, storage: UploadStorage, documentRepository?: DocumentRepository, documentWorkLimiter?: WorkLimiter) {
@@ -87,8 +87,18 @@ function createMemoryRepository(documentRepository?: DocumentRepository, options
   };
 }
 
-function createMemoryStorage(fileBytes = Buffer.from("%PDF-1.7 readable bytes")): UploadStorage {
-  return {
+type MemoryStorage = UploadStorage & {
+  deleted: string[];
+  downloads: string[];
+  /** Override what storage reports for an object (size/content type), or null for "not uploaded". */
+  infoOverride?: { size: number; contentType?: string } | null;
+  failDelete?: boolean;
+};
+
+function createMemoryStorage(fileBytes = Buffer.from("%PDF-1.7 readable bytes")): MemoryStorage {
+  const store: MemoryStorage = {
+    deleted: [],
+    downloads: [],
     async createSignedUploadUrl(storageKey) {
       return { signedUrl: `https://storage.example/upload/${storageKey}`, token: "signed-upload-token" };
     },
@@ -98,13 +108,21 @@ function createMemoryStorage(fileBytes = Buffer.from("%PDF-1.7 readable bytes"))
     async uploadFile() {
       return undefined;
     },
-    async deleteFile() {
-      return undefined;
+    async deleteFile(storageKey) {
+      if (store.failDelete) throw new Error("storage delete timed out");
+      store.deleted.push(storageKey);
     },
-    async downloadFile() {
+    async getObjectInfo() {
+      if (store.infoOverride !== undefined) return store.infoOverride;
+      return { size: fileBytes.byteLength, contentType: "application/pdf" };
+    },
+    async downloadFile(storageKey, maxBytes) {
+      store.downloads.push(storageKey);
+      if (fileBytes.byteLength > maxBytes) throw new DownloadLimitExceededError("download exceeded limit");
       return fileBytes;
     }
   };
+  return store;
 }
 
 function createMemoryDocumentRepository(): DocumentRepository {
@@ -442,6 +460,99 @@ describe("uploadsRouter", () => {
       const response = await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body).expect(409);
       expect(response.body.error).toMatch(/being deleted/i);
       expect(await documentRepository.listDocuments("owner")).toHaveLength(0);
+    });
+  });
+
+  describe("actual upload size is enforced before parsing (RM-03)", () => {
+    const body = { provider: "google", voice: "en-US-Neural2-J", speed: 1 };
+    async function signed(app: ReturnType<typeof createTestApp>, byteSize = 1024) {
+      const created = await request(app)
+        .post("/api/uploads/pdf/sign")
+        .set("x-test-user", "owner")
+        .send({ filename: "notes.pdf", mimeType: "application/pdf", byteSize })
+        .expect(201);
+      return created.body as { id: string; storageKey: string };
+    }
+
+    it("rejects an object larger than declared without downloading it, and removes it", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage();
+      store.infoOverride = { size: 40 * 1024 * 1024, contentType: "application/pdf" };
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app, 1024);
+
+      const response = await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(413);
+
+      expect(response.body.error).toMatch(/larger than/i);
+      expect(store.downloads).toHaveLength(0);
+      expect(store.deleted).toEqual([upload.storageKey]);
+      expect(await repository.getUpload("owner", upload.id)).toBeNull();
+      expect(await documentRepository.listDocuments("owner")).toHaveLength(0);
+    });
+
+    it("keeps the reservation when the oversized object cannot be deleted", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage();
+      store.infoOverride = { size: 40 * 1024 * 1024, contentType: "application/pdf" };
+      store.failDelete = true;
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app, 1024);
+
+      await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(413);
+      expect(await repository.getUpload("owner", upload.id)).not.toBeNull();
+    });
+
+    it("asks the client to wait when the object has not been uploaded yet", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage();
+      store.infoOverride = null;
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app);
+
+      await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(409);
+      expect(store.deleted).toHaveLength(0);
+      expect(await repository.getUpload("owner", upload.id)).not.toBeNull();
+    });
+
+    it("rejects a stored object whose content type is not PDF, and removes it", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage();
+      store.infoOverride = { size: 512, contentType: "text/html" };
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app);
+
+      await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(415);
+      expect(store.downloads).toHaveLength(0);
+      expect(store.deleted).toEqual([upload.storageKey]);
+    });
+
+    it("removes an object whose bytes are not a PDF", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage(Buffer.from("not a pdf"));
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app);
+
+      await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(400);
+      expect(store.deleted).toEqual([upload.storageKey]);
+      expect(await repository.getUpload("owner", upload.id)).toBeNull();
+    });
+
+    it("caps the download at the declared size", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const store = createMemoryStorage(Buffer.concat([Buffer.from("%PDF-1.7 "), Buffer.alloc(4096, 97)]));
+      // Metadata understates the object, e.g. it was replaced after the check.
+      store.infoOverride = { size: 100, contentType: "application/pdf" };
+      const app = createTestApp(repository, store, documentRepository);
+      const upload = await signed(app, 200);
+
+      await request(app).post(`/api/uploads/${upload.id}/pdf/document`).set("x-test-user", "owner").send(body).expect(413);
+      expect(store.deleted).toEqual([upload.storageKey]);
     });
   });
 });

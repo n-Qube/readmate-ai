@@ -6,6 +6,7 @@ import { getUserId, type AuthedRequest } from "../auth.js";
 import type { prisma as PrismaSingleton } from "../prisma.js";
 import { extractPdfTextBlocks, isPdfBytes, type ExtractedPdfBlock, type PdfExtractionLimits } from "../pdf/extractPdfText.js";
 import { getSupabaseAdminClient, getUploadBucket, toPlainUint8Array } from "../storage.js";
+import { readBoundedResponseBody } from "../safeRemoteFetch.js";
 import { normalizeGoogleTtsVoice } from "../ttsSchema.js";
 import { PrismaDocumentRepository, type CreateDocumentInput, type DocumentRepository, type ReadingDocumentResponse } from "./documents.js";
 import { documentProcessingLimiter, type WorkLimiter, type WorkPermit } from "../workLimiter.js";
@@ -97,8 +98,15 @@ export type UploadStorage = {
   createSignedDownloadUrl(storageKey: string, expiresInSeconds: number): Promise<{ signedUrl: string }>;
   uploadFile(storageKey: string, bytes: Uint8Array, mimeType: string): Promise<void>;
   deleteFile(storageKey: string): Promise<void>;
-  downloadFile(storageKey: string): Promise<Uint8Array>;
+  /** Trusted stored-object metadata; null when nothing has been uploaded at that key. */
+  getObjectInfo(storageKey: string): Promise<{ size: number; contentType?: string } | null>;
+  /** Downloads at most maxBytes, throwing DownloadLimitExceededError beyond it. */
+  downloadFile(storageKey: string, maxBytes: number): Promise<Uint8Array>;
 };
+
+export class DownloadLimitExceededError extends Error {
+  readonly name = "DownloadLimitExceededError";
+}
 
 type UploadsRouterDeps = {
   repository?: UploadRepository;
@@ -194,10 +202,34 @@ export function uploadsRouter(deps: UploadsRouterDeps = {}): Router {
       }
 
       const payload = createPdfDocumentSchema.parse(req.body);
-      const bytes = await storage.downloadFile(upload.storageKey);
+      // Enforce the actual object, not the declared size: check trusted storage
+      // metadata before reading any bytes, then download with a hard cap.
+      const byteLimit = Math.min(upload.byteSize, MAX_PDF_BYTES);
+      const stored = await storage.getObjectInfo(upload.storageKey);
+      if (!stored) {
+        res.status(409).json({ error: "The PDF has not finished uploading yet. Please try again in a moment." });
+        return;
+      }
+      if (stored.size > byteLimit) {
+        await removeInvalidUpload(getUserId(req), upload, repository, storage);
+        throw new UploadValidationError("The uploaded file is larger than declared.", 413);
+      }
+      if (stored.contentType && stored.contentType !== "application/pdf") {
+        await removeInvalidUpload(getUserId(req), upload, repository, storage);
+        throw new UploadValidationError("The uploaded file is not a PDF.", 415);
+      }
+      let bytes: Uint8Array;
+      try {
+        bytes = await storage.downloadFile(upload.storageKey, byteLimit);
+      } catch (error) {
+        if (!(error instanceof DownloadLimitExceededError)) throw error;
+        await removeInvalidUpload(getUserId(req), upload, repository, storage);
+        throw new UploadValidationError("The uploaded file is larger than declared.", 413);
+      }
       const entitlement = await getEntitlement(req, getUserId(req));
       requireDocumentWithinPlan(entitlement, { byteSize: bytes.byteLength });
-      if (bytes.byteLength > MAX_PDF_BYTES || bytes.byteLength > upload.byteSize || !isPdfBytes(bytes)) {
+      if (!isPdfBytes(bytes)) {
+        await removeInvalidUpload(getUserId(req), upload, repository, storage);
         throw new UploadValidationError("Uploaded bytes are not a valid PDF within the declared size.");
       }
       let blocks: ExtractedPdfBlock[];
@@ -285,10 +317,28 @@ export class SupabaseUploadStorage implements UploadStorage {
     if (error) throw new Error(error.message);
   }
 
-  async downloadFile(storageKey: string): Promise<Uint8Array> {
-    const { data, error } = await getSupabaseAdminClient().storage.from(getUploadBucket()).download(storageKey);
-    if (error) throw new Error(error.message);
-    return new Uint8Array(await data.arrayBuffer());
+  async getObjectInfo(storageKey: string): Promise<{ size: number; contentType?: string } | null> {
+    const { data, error } = await getSupabaseAdminClient().storage.from(getUploadBucket()).info(storageKey);
+    if (error) {
+      const status = Number((error as { statusCode?: string | number }).statusCode ?? (error as { status?: number }).status);
+      if (status === 404 || /not.?found/i.test(error.message)) return null;
+      throw new Error(error.message);
+    }
+    return { size: Number(data.size ?? 0), contentType: data.contentType ?? undefined };
+  }
+
+  async downloadFile(storageKey: string, maxBytes: number): Promise<Uint8Array> {
+    // storage.download() buffers the whole object; stream through a short-lived
+    // signed URL instead and stop as soon as the cap is passed.
+    const { signedUrl } = await this.createSignedDownloadUrl(storageKey, 60);
+    const response = await fetch(signedUrl);
+    if (!response.ok) throw new Error(`Storage download failed with ${response.status}.`);
+    try {
+      return await readBoundedResponseBody(response, maxBytes);
+    } catch (error) {
+      if (error instanceof Error && /exceed|too large|limit/i.test(error.message)) throw new DownloadLimitExceededError(error.message);
+      throw error;
+    }
   }
 }
 
@@ -396,6 +446,25 @@ export class PrismaUploadRepository implements UploadRepository {
     });
     return uploads.map(serializeUpload);
   }
+}
+
+/**
+ * Deletes an invalid object through the Storage API, then releases its quota
+ * reservation. If the delete cannot be confirmed the record is kept, so usage
+ * stays accounted for until the scheduled cleanup succeeds.
+ */
+async function removeInvalidUpload(
+  userId: string,
+  upload: UploadRecordResponse,
+  repository: UploadRepository,
+  storage: UploadStorage
+): Promise<void> {
+  try {
+    await storage.deleteFile(upload.storageKey);
+  } catch {
+    return;
+  }
+  await repository.deleteUpload(userId, upload.id).catch(() => undefined);
 }
 
 async function cleanupExpiredPendingUploads(
