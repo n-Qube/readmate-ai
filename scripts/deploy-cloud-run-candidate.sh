@@ -133,6 +133,30 @@ else
 fi
 OPTIONAL_SECRET_ARG="--remove-secrets=${SECRETS_TO_REMOVE}"
 
+# Pin every secret to the exact version that is current now, so this revision
+# (and any later rollback to it) keeps the credentials it was tested with even
+# if a secret is rotated. If the build identity may not read version metadata,
+# keep ":latest" and say so rather than failing the deploy.
+pin_secret_versions() {
+  local pinned="" mapping env_name secret_ref secret_name version
+  IFS=',' read -ra mappings <<<"${RUNTIME_SECRET_MAPPINGS}"
+  for mapping in "${mappings[@]}"; do
+    env_name="${mapping%%=*}"
+    secret_ref="${mapping#*=}"
+    secret_name="${secret_ref%%:*}"
+    version="$("${GCLOUD}" secrets versions describe latest --secret="${secret_name}" --project="${PROJECT_ID}" --format='value(name.basename())' 2>/dev/null || true)"
+    if [[ "${version}" =~ ^[0-9]+$ ]]; then
+      pinned+="${pinned:+,}${env_name}=${secret_name}:${version}"
+      echo "secret_pin=${secret_name}:${version}"
+    else
+      pinned+="${pinned:+,}${mapping}"
+      echo "secret_pin=${secret_name}:latest (WARNING: could not resolve version)"
+    fi
+  done
+  RUNTIME_SECRET_MAPPINGS="${pinned}"
+}
+pin_secret_versions
+
 ARTIFACT_JSON="$("${GCLOUD}" artifacts docker images describe "${IMAGE_TAG}" \
   --project="${PROJECT_ID}" \
   --format=json)"
