@@ -19,7 +19,6 @@ const runtimeSecrets = new Map([
   ["SUPABASE_SERVICE_ROLE_KEY", "readmate-supabase-service-role-key"],
   ["GEMINI_API_KEY", "readmate-gemini-api-key"],
   ["KHAYA_API_KEY", "readmate-khaya-api-key"],
-  ["CARTESIA_API_KEY", "readmate-cartesia-api-key"],
   ["REVENUECAT_SECRET_API_KEY", "readmate-revenuecat-secret-api-key"],
   ["WEBMCP_AUDIT_DIGEST_KEY", "readmate-webmcp-audit-digest-key"],
   ["CRON_SECRET", "readmate-cron-secret"]

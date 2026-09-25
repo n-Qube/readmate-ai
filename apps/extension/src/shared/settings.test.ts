@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTargetLanguage, loadSettings, TARGET_LANGUAGES } from "./settings";
+import { isPremiumProvider, isTargetLanguage, isVoiceSupported, loadSettings, normalizeTtsProvider, TARGET_LANGUAGES, voicesForProvider } from "./settings";
 
 describe("target language settings", () => {
   it("exposes Ga using the Khaya ISO 639-3 code", () => {
@@ -40,5 +40,22 @@ describe("configured API origin", () => {
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       settings: expect.objectContaining({ apiBaseUrl: configuredApiBaseUrl }),
     }));
+  });
+});
+
+describe("speech providers", () => {
+  it("migrates the retired Cartesia provider to Gemini Flash TTS", () => {
+    expect(normalizeTtsProvider("cartesia")).toBe("gemini");
+    expect(normalizeTtsProvider("gemini-lite")).toBe("gemini-lite");
+    expect(normalizeTtsProvider("something-else")).toBe("google");
+  });
+
+  it("offers the Gemini voice catalogue for both Gemini tiers and gates only Flash", () => {
+    expect(voicesForProvider("gemini")).toHaveLength(30);
+    expect(isVoiceSupported("gemini-lite", "Kore")).toBe(true);
+    expect(isVoiceSupported("gemini", "en-US-Neural2-F")).toBe(false);
+    expect(isPremiumProvider("gemini")).toBe(true);
+    expect(isPremiumProvider("gemini-lite")).toBe(false);
+    expect(isPremiumProvider("google")).toBe(false);
   });
 });

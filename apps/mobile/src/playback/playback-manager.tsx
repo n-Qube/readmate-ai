@@ -4,7 +4,9 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatu
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
 import { Platform } from "react-native";
 import { ApiError } from "@/api/client";
-import { createSpeechAudioFile, createSpeechCastUrl, getUserSettings, updateDocumentProgress } from "@/api/documents";
+import { createSpeechAudioFile, createSpeechCastUrl, getDocument, getUserSettings, updateDocumentProgress } from "@/api/documents";
+import { needsFullDocument, withKnownBlocks } from "@/utils/document-blocks";
+import { playbackErrorMessage } from "@/playback/playback-error";
 import { addOutputStateListener, loadOutputMedia, sendOutputCommand, showOutputPicker as presentOutputPicker, type OutputMedia, type OutputState } from "@/native/output";
 import { AI_AUDIO_DISCLOSURE_TITLE, aiAudioMetadataSubtitle } from "@/playback/ai-audio-disclosure";
 import { endPlaybackLiveActivity, updatePlaybackLiveActivity } from "@/playback/live-activity";
@@ -97,6 +99,9 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
   const playerRef = useRef<AudioPlayer | null>(null);
   const subscriptionRef = useRef<{ remove: () => void } | null>(null);
   const runIdRef = useRef(0);
+  // Bumped whenever the listener picks a document, so work that awaited the
+  // network for an earlier pick can tell it has been superseded.
+  const selectionIdRef = useRef(0);
   const finishedRef = useRef(false);
   const activeDocumentRef = useRef<ReadingDocument | undefined>(undefined);
   const activeBlockIndexRef = useRef(0);
@@ -151,6 +156,13 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       setError(null);
       setState("ready");
       syncPlaybackLiveActivity(document, progressRef.current, "ready", 0, 0);
+      return;
+    }
+    if (state === "error" || state === "completed") {
+      // A failure or finished run belongs to the previous voice or language;
+      // don't show "Twi audio needs attention" after switching to English.
+      setError(null);
+      setState("ready");
     }
   }, [settingsQuery.data?.provider, settingsQuery.data?.voice, settingsQuery.data?.speed, settingsQuery.data?.targetLanguage]);
 
@@ -210,8 +222,45 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  async function playDocument(document: ReadingDocument, blockIndex?: number) {
-    await stop({ saveProgress: activeDocumentRef.current?.id !== document.id });
+  /**
+   * Library lists carry a summary without reading blocks. Load the full
+   * document (shared with the document screen's query cache) before playback.
+   */
+  async function loadFullDocument(document: ReadingDocument): Promise<ReadingDocument> {
+    const known = activeDocumentRef.current;
+    if (!needsFullDocument(document)) return document;
+    if (known?.id === document.id && known.blocks.length) return withKnownBlocks(document, known);
+    return queryClient.fetchQuery({
+      queryKey: ["document", document.id],
+      queryFn: async () => getDocument(document.id, await getToken()),
+      staleTime: 30_000
+    });
+  }
+
+  async function playDocument(requested: ReadingDocument, blockIndex?: number) {
+    const selectionId = ++selectionIdRef.current;
+    await stop({ saveProgress: activeDocumentRef.current?.id !== requested.id });
+    // Another document was chosen while the previous one was saving.
+    if (selectionId !== selectionIdRef.current) return;
+    let document = requested;
+    if (needsFullDocument(requested)) {
+      const runId = runIdRef.current;
+      activeDocumentRef.current = withKnownBlocks(requested, activeDocumentRef.current);
+      setActiveDocument(activeDocumentRef.current);
+      setState("loading");
+      setError(null);
+      try {
+        document = await loadFullDocument(requested);
+      } catch (caught) {
+        if (runId !== runIdRef.current) return;
+        setError(playbackErrorMessage(caught));
+        setState("ready");
+        return;
+      }
+      // Another document was chosen while this one was loading.
+      if (runId !== runIdRef.current || selectionId !== selectionIdRef.current) return;
+    }
+    activeDocumentRef.current = document;
     setActiveDocument(document);
     const resumeFromSavedPosition = blockIndex === undefined;
     const safeIndex = clamp(blockIndex ?? normalizedBlockIndex(document), 0, Math.max(0, document.blocks.length - 1));
@@ -227,9 +276,12 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     if (segment) await playSegment(document, segment, "loading");
   }
 
-  function selectDocument(document: ReadingDocument, options: { resetPlayback?: boolean } = {}) {
+  function selectDocument(selected: ReadingDocument, options: { resetPlayback?: boolean } = {}) {
     const currentDocument = activeDocumentRef.current;
+    // A summary list item must never replace text that is already loaded.
+    const document = withKnownBlocks(selected, currentDocument);
     const sameDocument = currentDocument?.id === document.id;
+    if (needsFullDocument(document)) void hydrateSelectedDocument(document, options);
     if (sameDocument && !options.resetPlayback) {
       activeDocumentRef.current = document;
       setActiveDocument(document);
@@ -239,6 +291,7 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     // Preserve the previous article's progress before switching the global
     // selection, but make the new article immediately visible on every screen.
     if (!sameDocument) void saveCurrentProgress();
+    selectionIdRef.current += 1;
     runIdRef.current += 1;
     finishedRef.current = false;
     if (isRemoteOutputConnected()) sendOutputCommand("stop");
@@ -247,12 +300,29 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     prefetchedSegmentRef.current = null;
     activeDocumentRef.current = document;
     setActiveDocument(document);
-    setProgressState(progressSnapshotForBlock(document, options.resetPlayback ? 0 : normalizedBlockIndex(document)));
+    setProgressState(needsFullDocument(document) && !options.resetPlayback
+      ? document.progress
+      : progressSnapshotForBlock(document, options.resetPlayback ? 0 : normalizedBlockIndex(document)));
     setCurrentTime(0);
     setDuration(0);
     setError(null);
     setState("ready");
     endPlaybackLiveActivity();
+  }
+
+  async function hydrateSelectedDocument(document: ReadingDocument, options: { resetPlayback?: boolean }) {
+    try {
+      const full = await loadFullDocument(document);
+      const current = activeDocumentRef.current;
+      if (current?.id !== full.id || !needsFullDocument(current)) return;
+      activeDocumentRef.current = full;
+      setActiveDocument(full);
+      if (state === "ready" || state === "idle") {
+        setProgressState(progressSnapshotForBlock(full, options.resetPlayback ? 0 : normalizedBlockIndex(full)));
+      }
+    } catch {
+      // Play retries the fetch and reports a failure to the listener.
+    }
   }
 
   async function toggleDocument(document: ReadingDocument) {
@@ -375,7 +445,9 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       const settings = playbackSettingsForDocument(document);
 
       const player = createAudioPlayer({ uri, name: document.title }, { updateInterval: 500 });
-      player.setPlaybackRate(settings.speed);
+      // A cast receiver plays the URL itself, so cast audio carries the speed
+      // from synthesis; local audio is neutral-rate and sped up here.
+      player.setPlaybackRate(useSecureCastUrl ? 1 : settings.speed);
       player.setActiveForLockScreen(
         true,
         {
@@ -493,13 +565,15 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
     const token = await getToken();
     const settings = playbackSettingsForDocument(document);
     if (runId !== runIdRef.current) throw new Error("Playback request was superseded.");
+    // Local playback applies the listener's speed with setPlaybackRate, so the
+    // file is synthesized at a neutral rate and stays reusable across speeds.
     return createSpeechAudioFile(token, {
       userId: userId ?? "signed-out",
-      cacheKey: `${document.id}-${segment.cacheKey}-${settings.provider}-${settings.voice}-${settings.speed}-${settings.targetLanguage}`,
+      cacheKey: `${document.id}-${segment.cacheKey}-${settings.provider}-${settings.voice}-${settings.targetLanguage}`,
       text: segment.text,
       provider: settings.provider,
       voice: settings.voice,
-      speed: settings.speed,
+      speed: 1,
       targetLanguage: settings.targetLanguage
     });
   }
@@ -542,14 +616,19 @@ export function PlaybackManagerProvider({ children }: PropsWithChildren) {
       sentenceIndex: Math.max(0, progress.sentenceIndex),
       percent: clamp(progress.percent, 0, 100)
     };
-    setProgressState(safeProgress);
+    const isActive = () => activeDocumentRef.current?.id === document.id;
+    if (isActive()) setProgressState(safeProgress);
     try {
-      const updated = await updateDocumentProgress(document.id, await getToken(), safeProgress);
-      queryClient.setQueryData(["document", document.id], updated);
+      const updated = withKnownBlocks(await updateDocumentProgress(document.id, await getToken(), safeProgress), document);
+      if (updated.blocks.length) queryClient.setQueryData(["document", document.id], updated);
       queryClient.setQueryData<ReadingDocument[]>(["documents"], (current) =>
         current?.map((item) => (item.id === updated.id ? updated : item))
       );
-      setActiveDocument(updated);
+      // The listener may have moved to another article while this save was in
+      // flight; never switch the player back to the document being saved.
+      if (!isActive()) return;
+      activeDocumentRef.current = withKnownBlocks(updated, activeDocumentRef.current);
+      setActiveDocument(activeDocumentRef.current);
     } catch {
       // Playback should remain usable even if a progress sync write is temporarily unavailable.
     }
@@ -920,19 +999,3 @@ function audioSettingsChanged(previous: PlaybackAudioSettings, next: PlaybackAud
   return previous.provider !== next.provider || previous.voice !== next.voice || previous.speed !== next.speed || previous.targetLanguage !== next.targetLanguage;
 }
 
-function playbackErrorMessage(caught: unknown): string {
-  const message = caught instanceof Error ? caught.message : "";
-  if (caught instanceof ApiError && [502, 503, 504].includes(caught.status)) {
-    return "ReadMate audio is temporarily busy. Tap play to retry in a moment.";
-  }
-  if (/sentences? that are too long|content is too long|input.*too long|maximum.*(bytes|characters)|SSML sentence/i.test(message)) {
-    return "This section was too long to prepare. Tap play to retry it in smaller parts.";
-  }
-  if (/credentials are not configured|GOOGLE_TTS_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_SERVICE_ACCOUNT_JSON|quota|billing/i.test(message)) {
-    return "Google voice is temporarily unavailable. Try again in a moment.";
-  }
-  if (/401|403|unauthorized|forbidden|session|token/i.test(message)) {
-    return "Your reading session needs to be refreshed. Open Settings, sign in again, then try playback.";
-  }
-  return message || "Could not start playback.";
-}

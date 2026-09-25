@@ -38,6 +38,10 @@ export const learningPayloadSchema = z.object({
   quiz: cappedObjectArray(quizQuestionSchema, 12, 1)
 });
 
+/** Focused regeneration of one study part, so a new flashcard set never rewrites the quiz. */
+export const flashcardSetSchema = z.object({ flashcards: cappedObjectArray(flashcardSchema, 24, 1) });
+export const quizSetSchema = z.object({ quiz: cappedObjectArray(quizQuestionSchema, 12, 1) });
+
 export const askAnswerSchema = z.object({
   answer: z.string().trim().min(1).max(4000),
   citedSections: cappedStringArray(6, 300).default([])
@@ -117,6 +121,18 @@ export const learningJsonSchema = {
     }
   },
   required: ["summary", "keyPoints", "topicTags", "flashcards", "quiz"]
+} as const;
+
+export const flashcardSetJsonSchema = {
+  type: "object",
+  properties: { flashcards: learningJsonSchema.properties.flashcards },
+  required: ["flashcards"]
+} as const;
+
+export const quizSetJsonSchema = {
+  type: "object",
+  properties: { quiz: learningJsonSchema.properties.quiz },
+  required: ["quiz"]
 } as const;
 
 export const askJsonSchema = {

@@ -22,7 +22,7 @@ EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_<publishable-value>
 EXPO_PUBLIC_READMATE_API_URL=https://<production-api-host>
 ```
 
-Only reviewed client values may use `EXPO_PUBLIC_*`. Never put `CLERK_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `CRON_SECRET`, `REVENUECAT_SECRET_API_KEY`, `WEBMCP_AUDIT_DIGEST_KEY`, Gemini/Khaya/Cartesia/Google credentials, private keys, or provider tokens in Expo public variables. The export validator checks the public-variable allowlist and scans the output for backend-only access and secret-shaped values.
+Only reviewed client values may use `EXPO_PUBLIC_*`. Never put `CLERK_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `CRON_SECRET`, `REVENUECAT_SECRET_API_KEY`, `WEBMCP_AUDIT_DIGEST_KEY`, Gemini/Khaya/Google credentials, private keys, or provider tokens in Expo public variables. The export validator checks the public-variable allowlist and scans the output for backend-only access and secret-shaped values.
 
 The API requires two separate CORS inputs:
 

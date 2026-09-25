@@ -100,12 +100,6 @@ export function FirstRunOnboarding({ onComplete }: { onComplete: (options?: { sh
       <Animated.View style={[styles.referenceFrame, { opacity: contentOpacity, transform: [{ translateX: contentOffset }] }]}>
         <Image source={step.image} resizeMode="cover" style={styles.referenceImage} />
         <WobblingConnection screen={stepIndex} />
-        {stepIndex > 0 ? (
-          <View pointerEvents="none" style={styles.topControlsMask}>
-            <Progress active={stepIndex} />
-            <Text style={styles.skipOverlay}>Skip</Text>
-          </View>
-        ) : null}
         {stepIndex === 2 ? <VoiceChoices /> : null}
         {stepIndex === 2 ? (
           <View pointerEvents="none" style={styles.copyMask}>
@@ -115,8 +109,23 @@ export function FirstRunOnboarding({ onComplete }: { onComplete: (options?: { sh
         ) : null}
       </Animated.View>
 
-      <Pressable accessibilityRole="button" accessibilityLabel="Skip onboarding" onPress={() => onComplete({ showSetup: false })} style={[styles.skipHit, { top: insets.top + 48 }]} />
-      <Pressable accessibilityRole="button" accessibilityLabel={stepIndex === steps.length - 1 ? "Finish onboarding" : "Next onboarding screen"} onPress={next} style={styles.nextHit} />
+      {/* The artwork has controls painted in; cover them with real, tappable ones below the status bar. */}
+      <View style={[styles.topControlsMask, { height: insets.top + 64 }]}>
+        <View style={[styles.progressRow, { top: insets.top + 22 }]}>
+          <Progress active={stepIndex} />
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Skip onboarding" hitSlop={12} onPress={() => onComplete({ showSetup: false })} style={[styles.skipButton, { top: insets.top + 14 }]}>
+          <Text style={styles.skipText}>Skip</Text>
+        </Pressable>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={stepIndex === steps.length - 1 ? "Finish onboarding" : "Next onboarding screen"}
+        onPress={next}
+        style={({ pressed }) => [styles.nextButton, { bottom: Math.max(insets.bottom, 16) + 16, opacity: pressed ? 0.85 : 1 }]}
+      >
+        <Text style={styles.nextText}>{stepIndex === steps.length - 1 ? "Get started" : "Continue"}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -156,12 +165,14 @@ const styles = StyleSheet.create({
   splashProgressFill: { width: "62%", height: "100%", borderRadius: 2, backgroundColor: colors.blue },
   referenceFrame: { ...StyleSheet.absoluteFill },
   referenceImage: { width: "100%", height: "100%" },
-  progress: { position: "absolute", left: 0, right: 0, top: 0, height: 34, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16 },
+  progressRow: { position: "absolute", left: 0, right: 0 },
+  progress: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16 },
   dot: { width: 9, height: 9, borderRadius: 5 },
   dotActive: { backgroundColor: colors.claret },
   dotInactive: { backgroundColor: "#d8d0c2" },
-  topControlsMask: { position: "absolute", left: 0, right: 0, top: 0, height: 90, backgroundColor: colors.bg },
-  skipOverlay: { position: "absolute", right: 34, top: 52, color: colors.claret, fontSize: 16, lineHeight: 22, fontWeight: "600" },
+  topControlsMask: { position: "absolute", left: 0, right: 0, top: 0, backgroundColor: colors.bg },
+  skipButton: { position: "absolute", right: 22, minHeight: 32, paddingHorizontal: 10, justifyContent: "center" },
+  skipText: { color: colors.claret, fontSize: 16, lineHeight: 22, fontWeight: "700" },
   connectionOverlay: { position: "absolute", height: 8, left: 0, right: 0 },
   connectionFirst: { top: "38%" },
   connectionSources: { top: "40%" },
@@ -171,13 +182,13 @@ const styles = StyleSheet.create({
   copyMask: { position: "absolute", left: 0, right: 0, top: "48%", height: "27%", backgroundColor: colors.bg, alignItems: "center", paddingHorizontal: 30, paddingTop: 18 },
   replacementTitle: { color: colors.ink, fontFamily: "Georgia", fontSize: 38, lineHeight: 43, fontWeight: "700", textAlign: "center" },
   replacementSubtitle: { color: colors.muted, marginTop: 18, fontSize: 18, lineHeight: 27, fontWeight: "500", textAlign: "center" },
-  voiceChoicesMask: { position: "absolute", left: 0, right: 0, top: "29%", height: "23%", backgroundColor: colors.bg, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  voiceChoicesMask: { position: "absolute", left: 0, right: 0, top: "22%", height: "30%", backgroundColor: colors.bg, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   voiceChoiceLine: { position: "absolute", left: 34, right: 34, bottom: 22, height: 2, backgroundColor: colors.teal },
   voiceChoiceRow: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   voiceChoice: { width: 86, height: 74, borderRadius: 16, borderWidth: 2, borderColor: "#c8c1b4", backgroundColor: "rgba(255,253,248,0.72)", alignItems: "center", justifyContent: "center" },
   voiceChoiceSelected: { backgroundColor: colors.teal, borderColor: colors.teal },
   voiceChoiceLabel: { color: colors.teal, fontSize: 15, fontWeight: "800" },
   voiceChoiceLabelSelected: { color: colors.surface },
-  skipHit: { position: "absolute", right: 24, width: 84, height: 48 },
-  nextHit: { position: "absolute", left: 0, right: 0, bottom: 0, height: "54%" }
+  nextButton: { position: "absolute", left: 24, right: 24, minHeight: 54, alignItems: "center", justifyContent: "center", borderRadius: 999, backgroundColor: colors.player },
+  nextText: { color: colors.surface, fontSize: 16, fontWeight: "800" }
 });

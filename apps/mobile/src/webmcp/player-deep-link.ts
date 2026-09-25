@@ -1,4 +1,5 @@
 import { defaultVoiceForLanguage, voicesForLanguage } from "../config/local-voices";
+import { DEFAULT_VOICE_BY_PROVIDER, isGeminiProvider, isGeminiVoice } from "../config/tts-providers";
 import type { UserSettings } from "../types";
 
 export const playerTargetLanguages = ["en", "tw", "ee", "gaa"] as const;
@@ -59,11 +60,16 @@ export function settingsForPlayerDeepLink(
 export function voiceForPlayerLanguage(
   provider: UserSettings["provider"],
   currentVoice: string,
-  targetLanguage: PlayerTargetLanguage
+  targetLanguage: PlayerTargetLanguage,
+  /** The listener's last English voice, restored when leaving Twi, Ewe, or Ga. */
+  rememberedEnglishVoice?: string
 ): string {
   if (voiceSupportsLanguage(provider, currentVoice, targetLanguage)) return currentVoice;
+  if (targetLanguage === "en" && rememberedEnglishVoice && voiceSupportsLanguage(provider, rememberedEnglishVoice, "en")) {
+    return rememberedEnglishVoice;
+  }
   return targetLanguage === "en"
-    ? provider === "cartesia" ? "cartesia-default" : defaultEnglishVoice
+    ? DEFAULT_VOICE_BY_PROVIDER[provider] ?? defaultEnglishVoice
     : defaultVoiceForLanguage(targetLanguage);
 }
 
@@ -71,9 +77,7 @@ function voiceSupportsLanguage(provider: UserSettings["provider"], voice: string
   const normalized = voice.trim();
   if (!normalized) return false;
   if (targetLanguage === "en") {
-    return provider === "cartesia"
-      ? normalized === "cartesia-default" || (!googleEnglishVoices.has(normalized) && !normalized.startsWith("khaya:") && !normalized.startsWith("ghananlp-"))
-      : googleEnglishVoices.has(normalized);
+    return isGeminiProvider(provider) ? isGeminiVoice(normalized) : googleEnglishVoices.has(normalized);
   }
   if (targetLanguage === "tw" && ["ghananlp-asante-twi", "ghananlp-akuapem-twi"].includes(normalized)) {
     return true;

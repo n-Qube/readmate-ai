@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ReadMate",
   "description": "Listen to web pages, selected text, and uploaded PDFs with selectable AI text-to-speech.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "contextMenus", "sidePanel", "storage", "scripting", "cookies"],
   "host_permissions": [

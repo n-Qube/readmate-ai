@@ -1,7 +1,6 @@
 import type { ExtensionSettings, LearningReview, ReadingChunk, ReadingDocument } from "../shared/types";
 import { normalizeUploadedDocumentForDisplay } from "../shared/documentDisplay";
 
-export type CartesiaVoiceOption = { id: string; name: string; description?: string; language?: string; gender?: string };
 
 export type ReadMateEntitlement = {
   plan: "free" | "premium";
@@ -68,17 +67,6 @@ export const TTS_AUTH_REQUIRED_ERROR = AUTH_REQUIRED_ERROR;
 const COMPACT_LIBRARY_PAGE_SIZE = 100;
 const MAX_COMPACT_LIBRARY_PAGES = 100;
 
-export async function getCartesiaVoices(apiBaseUrl: string, token: string | null): Promise<CartesiaVoiceOption[]> {
-  if (!token) return [];
-  const response = await fetch(`${apiBaseUrl}/api/tts/voices`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  throwIfAuthRequired(response);
-  if (!response.ok) throw new Error("Unable to load Cartesia voices.");
-  const payload = await response.json() as { voices?: CartesiaVoiceOption[] };
-  return Array.isArray(payload.voices) ? payload.voices.filter((voice) => voice?.id && voice?.name) : [];
-}
-
 export async function requestTtsAudio(
   settings: ExtensionSettings,
   token: string | null,
@@ -95,7 +83,9 @@ export async function requestTtsAudio(
       text,
       provider: settings.ttsProvider,
       voice: settings.voice,
-      speed: settings.speed,
+      // The side panel applies the listener's speed with audio.playbackRate.
+      // Baking it into synthesis as well would compound (1.5x became 2.25x).
+      speed: 1,
       targetLanguage: settings.targetLanguage,
       instructions: settings.instructions
     })
@@ -554,9 +544,20 @@ export type LearningGenerationOptions = {
 
 export type LearningGenerationResult = {
   document: ReadingDocument;
+  /** The AI service was unavailable, so the server used quick notes from the text. */
   fallback: boolean;
+  /** On fallback, an existing saved study set was kept instead of replaced. */
+  preserved: boolean;
   syncPending: boolean;
 };
+
+/** User-facing note when Study material did not come from the AI service. */
+export function studyFallbackNotice(result: Pick<LearningGenerationResult, "fallback" | "preserved">): string | null {
+  if (!result.fallback) return null;
+  return result.preserved
+    ? "ReadMate AI is busy, so your saved study set was kept. Try generating again in a few minutes."
+    : "ReadMate AI is busy, so these are quick study notes taken from the text. Try generating again in a few minutes for AI flashcards and quiz questions.";
+}
 
 export async function generateDocumentLearning(
   apiBaseUrl: string,
@@ -579,6 +580,7 @@ export async function generateDocumentLearning(
   return {
     document: result.document,
     fallback: Boolean(result.fallback),
+    preserved: Boolean(result.preserved),
     syncPending: Boolean(result.syncPending)
   };
 }

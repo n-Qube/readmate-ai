@@ -8,7 +8,11 @@ dist
 apps/*/node_modules
 apps/*/dist
 apps/mobile/.expo
-apps/mobile
+# The API image needs only the challenge RSS fixture from the mobile app.
+apps/mobile/*
+!apps/mobile/public/
+apps/mobile/public/*
+!apps/mobile/public/challenge-feed.xml
 apps/extension
 docs
 build-logs

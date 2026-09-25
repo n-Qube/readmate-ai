@@ -25,7 +25,7 @@ const originalEnv = { ...process.env };
 
 type TestAppOptions = Pick<
   NonNullable<Parameters<typeof learningRouter>[0]>,
-  "consumeUsage" | "webMcpActionRepository" | "webMcpDigestKey" | "studyPackEffectRepository" | "accountDeletionGuard"
+  "consumeUsage" | "releaseUsage" | "webMcpActionRepository" | "webMcpDigestKey" | "studyPackEffectRepository" | "accountDeletionGuard"
 >;
 
 function createTestApp(
@@ -45,6 +45,7 @@ function createTestApp(
     generator,
     learningRepository,
     consumeUsage: options.consumeUsage ?? (async () => 0),
+    releaseUsage: options.releaseUsage ?? (async () => undefined),
     webMcpActionRepository: options.webMcpActionRepository,
     webMcpDigestKey: options.webMcpDigestKey,
     studyPackEffectRepository:
@@ -154,9 +155,10 @@ function createMemoryStudyPackEffectRepository(): StudyPackEffectRepository {
   return new PrismaStudyPackEffectRepository(delegate);
 }
 
-function createMemoryDocumentRepository(): DocumentRepository {
+function createMemoryDocumentRepository(options: { seedStudySet?: boolean } = {}): DocumentRepository {
   const documents = new Map<string, ReadingDocumentResponse>();
   const now = "2026-05-27T12:00:00.000Z";
+  const seedStudySet = options.seedStudySet ?? true;
   documents.set("doc_1", {
     id: "doc_1",
     userId: "owner",
@@ -170,11 +172,15 @@ function createMemoryDocumentRepository(): DocumentRepository {
     provider: "google",
     voice: "en-US-Neural2-F",
     speed: 1,
-    summary: "Library keeps saved items separate from recent listening history.",
-    keyPoints: ["Saved items stay in Library"],
-    flashcards: [{ front: "Stored card?", back: "Stored answer." }],
-    quizQuestions: [{ question: "Stored quiz?", answer: "Stored answer.\n\nStored explanation." }],
-    topicTags: ["AI", "Learning"],
+    ...(seedStudySet
+      ? {
+          summary: "Library keeps saved items separate from recent listening history.",
+          keyPoints: ["Saved items stay in Library"],
+          flashcards: [{ front: "Stored card?", back: "Stored answer." }],
+          quizQuestions: [{ question: "Stored quiz?", answer: "Stored answer.\n\nStored explanation." }],
+          topicTags: ["AI", "Learning"]
+        }
+      : { keyPoints: [], flashcards: [], quizQuestions: [], topicTags: [] }),
     blocks: [
       { id: "block_1", orderIndex: 0, blockType: "heading", text: "Learning article" },
       { id: "block_2", orderIndex: 1, blockType: "paragraph", text: "Gemini creates summaries, flashcards, and quizzes from saved reading material." },
@@ -280,7 +286,7 @@ function createMemoryLearningRepository(): LearningRepository {
 
   return {
     async syncGeneratedLearning(userId, documentId, learning) {
-      learning.flashcards.forEach((card, index) => {
+      learning.flashcards?.forEach((card, index) => {
         flashcards.set(`generated_flash_${index}`, {
           id: `generated_flash_${index}`,
           documentId,
@@ -293,7 +299,7 @@ function createMemoryLearningRepository(): LearningRepository {
           updatedAt: "2026-05-27T12:02:00.000Z"
         });
       });
-      learning.quiz.forEach((quiz, index) => {
+      learning.quiz?.forEach((quiz, index) => {
         quizQuestions.set(`generated_quiz_${index}`, {
           id: `generated_quiz_${index}`,
           documentId,
@@ -693,7 +699,7 @@ describe("learningRouter", () => {
 
   it("falls back to extractive study material when Gemini is temporarily overloaded", async () => {
     const learningRepository = createMemoryLearningRepository();
-    const app = createTestApp(repository, createHighDemandGenerator(), learningRepository);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), createHighDemandGenerator(), learningRepository);
 
     const response = await request(app).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
 
@@ -709,6 +715,39 @@ describe("learningRouter", () => {
     );
   });
 
+  it.each(["summary", "flashcards", "quiz"])("keeps a saved AI study set instead of overwriting it with /%s fallback", async (mode) => {
+    const learningRepository = createMemoryLearningRepository();
+    await request(createTestApp(repository, generator, learningRepository)).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+    const updateDocument = vi.spyOn(repository, "updateDocument");
+
+    const response = await request(createTestApp(repository, createHighDemandGenerator(), learningRepository))
+      .post(`/api/learning/doc_1/${mode}`)
+      .set("x-test-user", "owner")
+      .expect(200);
+
+    expect(response.body).toMatchObject({ fallback: true, preserved: true, syncPending: false });
+    expect(response.body.document.flashcards).toEqual([{ front: "What does Gemini create?", back: "Study material." }]);
+    expect(updateDocument).not.toHaveBeenCalled();
+    const review = await learningRepository.getReview("owner", response.body.document);
+    expect(review.flashcards.map((card) => card.question)).toContain("What does Gemini create?");
+  });
+
+  it("refunds the AI usage charge when generation falls back, but not when it succeeds", async () => {
+    const releaseUsage = vi.fn(async () => undefined);
+    const consumeUsage = vi.fn(async () => 0);
+    const unstudied = createMemoryDocumentRepository({ seedStudySet: false });
+
+    await request(createTestApp(unstudied, createHighDemandGenerator(), undefined, { consumeUsage, releaseUsage })).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+    await request(createTestApp(unstudied, createHighDemandGenerator(), undefined, { consumeUsage, releaseUsage })).post("/api/learning/doc_1/ask").set("x-test-user", "owner").send({ question: "What is stored?" }).expect(200);
+    const charged = (consumeUsage.mock.calls[0] as unknown as [string, string, number])[2];
+    expect(releaseUsage).toHaveBeenNthCalledWith(1, "owner", "ai_input_chars", charged);
+    expect(releaseUsage).toHaveBeenCalledTimes(2);
+
+    releaseUsage.mockClear();
+    await request(createTestApp(repository, generator, undefined, { consumeUsage, releaseUsage })).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+    expect(releaseUsage).not.toHaveBeenCalled();
+  });
+
   it("falls back to extractive study material for non-transient Gemini failures", async () => {
     const brokenGenerator: LearningGenerator = {
       ...generator,
@@ -716,7 +755,7 @@ describe("learningRouter", () => {
         throw new Error("Gemini credentials are not configured correctly.");
       })
     };
-    const app = createTestApp(repository, brokenGenerator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), brokenGenerator);
 
     const response = await request(app).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
 
@@ -731,7 +770,7 @@ describe("learningRouter", () => {
         throw Object.assign(new Error("The operation was aborted."), { name: "TimeoutError" });
       })
     };
-    const app = createTestApp(repository, timeoutGenerator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), timeoutGenerator);
 
     const response = await request(app)
       .post("/api/learning/doc_1/summary")
@@ -752,7 +791,7 @@ describe("learningRouter", () => {
       status: 503,
       headers: { "Content-Type": "application/json" }
     })));
-    const app = createTestApp(repository, generator);
+    const app = createTestApp(createMemoryDocumentRepository({ seedStudySet: false }), generator);
 
     const response = await request(app)
       .post("/api/learning/doc_1/summary")
@@ -765,6 +804,18 @@ describe("learningRouter", () => {
       summary: "Detailed learning summary",
       flashcards: [{ front: "What does Gemini create?", back: "Study material." }]
     });
+  });
+
+  it("returns the generated pack with syncPending instead of a 500 when review-row sync fails", async () => {
+    const learningRepository = createMemoryLearningRepository();
+    vi.spyOn(learningRepository, "syncGeneratedLearning").mockRejectedValue(Object.assign(new Error("Transaction already closed"), { name: "PrismaClientKnownRequestError", code: "P2028" }));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await request(createTestApp(repository, generator, learningRepository)).post("/api/learning/doc_1/summary").set("x-test-user", "owner").expect(200);
+
+    expect(response.body).toMatchObject({ fallback: false, syncPending: true });
+    expect(response.body.document.summary).toBe("Detailed learning summary");
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('"code":"P2028"'));
   });
 
   it("retries a temporary generated-study sync failure", async () => {
@@ -796,6 +847,45 @@ describe("learningRouter", () => {
     expect(response.body.syncPending).toBe(true);
     expect(response.body.document.summary).toBe("Detailed learning summary");
     expect(learningRepository.syncGeneratedLearning).toHaveBeenCalledTimes(2);
+  });
+
+  it("regenerates only flashcards with a focused request and leaves the quiz untouched", async () => {
+    const learningRepository = createMemoryLearningRepository();
+    const syncGeneratedLearning = vi.spyOn(learningRepository, "syncGeneratedLearning");
+    const focused: LearningGenerator = {
+      ...createFakeGenerator(),
+      generateFlashcards: vi.fn(async () => [{ question: "What is focused?", answer: "Only flashcards." }]),
+      generateQuiz: vi.fn()
+    };
+
+    const response = await request(createTestApp(repository, focused, learningRepository))
+      .post("/api/learning/doc_1/flashcards")
+      .set("x-test-user", "owner")
+      .send({ flashcardCount: 8 })
+      .expect(200);
+
+    expect(focused.generateFlashcards).toHaveBeenCalledWith(expect.objectContaining({ count: 8, title: "Learning article" }));
+    expect(focused.generateLearning).not.toHaveBeenCalled();
+    expect(focused.generateQuiz).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({ fallback: false, preserved: false, flashcards: [{ question: "What is focused?", answer: "Only flashcards." }] });
+    expect(response.body.document.quizQuestions).toEqual([{ question: "Stored quiz?", answer: "Stored answer.\n\nStored explanation." }]);
+    expect(syncGeneratedLearning).toHaveBeenCalledWith("owner", "doc_1", { topicTags: ["AI", "Learning"], flashcards: [{ question: "What is focused?", answer: "Only flashcards." }] });
+  });
+
+  it("keeps the saved quiz when focused quiz generation fails", async () => {
+    const updateDocument = vi.spyOn(repository, "updateDocument");
+    const failing: LearningGenerator = {
+      ...createFakeGenerator(),
+      generateQuiz: vi.fn(async () => {
+        throw new Error("This model is currently experiencing high demand.");
+      })
+    };
+
+    const response = await request(createTestApp(repository, failing)).post("/api/learning/doc_1/quiz").set("x-test-user", "owner").expect(200);
+
+    expect(response.body).toMatchObject({ fallback: true, preserved: true, syncPending: false });
+    expect(response.body.quiz).toEqual([expect.objectContaining({ question: "Stored quiz?", correctAnswer: "Stored answer." })]);
+    expect(updateDocument).not.toHaveBeenCalled();
   });
 
   it("generates flashcards without exposing the Gemini key to the client", async () => {

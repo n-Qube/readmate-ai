@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { documentsRouter, type DocumentLibraryItemResponse, type DocumentListFilters, type DocumentRepository, type ReadingDocumentResponse } from "./documents.js";
 import type { AuthedRequest } from "../auth.js";
 
@@ -325,6 +325,35 @@ describe("documentsRouter", () => {
 
     expect(response.body).toHaveLength(1);
     expect(response.body[0]).toMatchObject({ title: "A", userId: "user_a" });
+  });
+
+  it("returns a text-free progress response only when the client asks for the summary view", async () => {
+    const app = createTestApp(repository);
+    const created = await request(app)
+      .post("/api/documents")
+      .set("x-test-user", "user_a")
+      .send({ title: "A", sourceType: "selection", voice: "marin", speed: 1, blocks: [{ text: "Alpha" }, { text: "Beta" }] })
+      .expect(201);
+    const progress = { progress: { blockIndex: 1, characterOffset: 0, sentenceIndex: 0, percent: 50 } };
+
+    const summary = await request(app).patch(`/api/documents/${created.body.id}/progress?view=summary`).set("x-test-user", "user_a").send(progress).expect(200);
+    const full = await request(app).patch(`/api/documents/${created.body.id}/progress`).set("x-test-user", "user_a").send(progress).expect(200);
+
+    expect(summary.body).toMatchObject({ blocks: [], blockCount: 2, progress: { percent: 50 } });
+    expect(full.body.blocks).toHaveLength(2);
+  });
+
+  it("forwards the lightweight summary view to the repository and rejects unknown views", async () => {
+    const listDocuments = vi.spyOn(repository, "listDocuments");
+    const app = createTestApp(repository);
+
+    await request(app).get("/api/documents?view=summary").set("x-test-user", "user_a").expect(200);
+    await request(app).get("/api/documents").set("x-test-user", "user_a").expect(200);
+    await request(app).get("/api/documents?view=everything").set("x-test-user", "user_a").expect(400);
+
+    expect(listDocuments).toHaveBeenNthCalledWith(1, "user_a", expect.objectContaining({ view: "summary" }));
+    expect(listDocuments).toHaveBeenNthCalledWith(2, "user_a", expect.objectContaining({ view: undefined }));
+    expect(listDocuments).toHaveBeenCalledTimes(2);
   });
 
   it("pages through every owned Library item using a compact response with a stable timestamp tie-breaker", async () => {

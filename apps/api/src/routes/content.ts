@@ -245,19 +245,19 @@ export function contentRouter(deps: ContentRouterDeps = {}): Router {
       const coverImages = await cacheRemoteCoverImages({
         imageUrl: article.thumbnailUrl,
         userId,
-        title: payload.title ?? article.title,
+        title: savedPageTitle(article.title, payload.title),
         sourceName: article.sourceName ?? source.sourceName,
         category: article.category,
         fetcher,
         lookup,
         mediaStorage
       });
-      const learning = learningDataForContent(payload.title ?? article.title, article.description, article.blocks);
+      const learning = learningDataForContent(savedPageTitle(article.title, payload.title), article.description, article.blocks);
       let document: ReadingDocumentResponse;
       try {
         if (action.kind === "execute") await accountDeletionGuard(userId);
         document = await documentRepository.createDocument(userId, {
-        title: payload.title ?? article.title,
+        title: savedPageTitle(article.title, payload.title),
         sourceType: payload.sourceType === "news" ? "news" : "webpage",
         sourceUrl: article.sourceUrl,
         canonicalUrl: article.canonicalUrl,
@@ -509,7 +509,8 @@ export async function saveRssFeed(input: {
     if (!hasReadableBody(itemText)) continue;
     requireDocumentWithinPlan(input.entitlement, { textCharacters: textCharacterCount(itemText) });
     const category = article?.category ?? categoryForText([item.title, item.description].join(" "));
-    const title = article?.title ?? item.title;
+    // The feed's own headline is clean; page titles often carry " - Site Name".
+    const title = item.title && item.title !== "Untitled feed item" ? item.title : article?.title ?? item.title;
     const canonicalUrl = normalizeArticleUrl(article?.canonicalUrl ?? normalizedItemLink);
     const sourceUrl = normalizedItemLink ?? canonicalUrl;
     const dedupeKey = rssDedupeKey({ feedUrl: resolved.feedUrl, guid: item.guid, link: sourceUrl, canonicalUrl, title, publishedAt: item.publishedAt });
@@ -568,9 +569,10 @@ export async function saveRssFeed(input: {
       let coverImages;
       try {
         coverImages = await cacheRemoteCoverImages({
-          // HTTPS-only WebMCP sync avoids following untrusted image redirects;
-          // the deterministic branded fallback remains bounded to the five-item batch.
-          imageUrl: input.requireHttps ? undefined : item.imageUrl ?? article?.thumbnailUrl,
+          // HTTPS-only syncs (app and WebMCP sources, background refresh) still
+          // use the article's artwork, fetched without any plain-HTTP hop.
+          imageUrl: item.imageUrl ?? article?.thumbnailUrl,
+          requireHttps: input.requireHttps,
           userId: input.userId,
           title,
           sourceName: feedTitle,
@@ -859,6 +861,21 @@ function isHttpsUrl(value: string | undefined): boolean {
   }
 }
 
+/** "Headline - Engadget" / "Headline | The Verge" -> "Headline"; a bare site name is kept. */
+function stripSiteSuffix(title: string, siteName: string | undefined): string {
+  const site = siteName?.trim();
+  if (!site || title.trim().toLowerCase() === site.toLowerCase()) return title;
+  return title.replace(new RegExp(`\\s+[-|\u2013\u2014\u00b7:]\\s+${escapeRegExp(site)}\\s*$`, "i"), "").trim() || title;
+}
+
+/**
+ * A saved page's own headline wins over a client-supplied title: older app
+ * builds sent the site name ("Engadget") as the title for every saved page.
+ */
+function savedPageTitle(articleTitle: string | undefined, clientTitle: string | undefined): string {
+  return articleTitle?.trim() ? articleTitle : clientTitle ?? articleTitle ?? "";
+}
+
 function extractMetadata(html: string, url: string) {
   const title =
     meta(html, "property", "og:title") ??
@@ -873,7 +890,7 @@ function extractMetadata(html: string, url: string) {
   const sourceName = meta(html, "property", "og:site_name") ?? sourceNameFromUrl(url);
   const articleHtml = matchFirst(html, /<article\b[^>]*>([\s\S]*?)<\/article>/i) ?? matchFirst(html, /<main\b[^>]*>([\s\S]*?)<\/main>/i);
   return {
-    title: stripHtml(title),
+    title: stripSiteSuffix(stripHtml(title), sourceName),
     description: description ? stripHtml(description) : undefined,
     canonicalUrl: canonicalUrl ? absolutizeUrl(canonicalUrl, url) : undefined,
     thumbnailUrl: absolutizeUrl(ogImage ?? twitterImage ?? structuredImage ?? bodyImage, url),
@@ -1126,7 +1143,7 @@ function knownSource(input: string) {
 }
 
 function meta(html: string, attrName: "name" | "property", attrValueText: string): string | undefined {
-  const pattern = new RegExp(`<meta\\b(?=[^>]*\\b${attrName}=["']${escapeRegExp(attrValueText)}["'])(?=[^>]*\\bcontent=["'][^"']+["'])[^>]*>`, "i");
+  const pattern = new RegExp(`<meta\\b(?=[^>]*\\b${attrName}=["']${escapeRegExp(attrValueText)}["'])(?=[^>]*\\bcontent=(?:"[^"]+"|'[^']+'))[^>]*>`, "i");
   const tag = matchWhole(html, pattern);
   return tag ? decodeHtml(attrValue(tag, "content") ?? "") : undefined;
 }
@@ -1163,8 +1180,10 @@ function matchWhole(value: string, pattern: RegExp): string | undefined {
 }
 
 function attrValue(tag: string, name: string): string | undefined {
-  const match = tag.match(new RegExp(`\\b${escapeRegExp(name)}=["']([^"']+)["']`, "i"));
-  return match ? decodeHtml(match[1]) : undefined;
+  // Read up to the matching quote so values like content="Pixel 11's ..." stay whole.
+  const match = tag.match(new RegExp(`\\b${escapeRegExp(name)}=(?:"([^"]+)"|'([^']+)')`, "i"));
+  const value = match?.[1] ?? match?.[2];
+  return value ? decodeHtml(value) : undefined;
 }
 
 function stripHtml(value: string): string {
@@ -1269,17 +1288,21 @@ function learningDataForContent(
   quizQuestions: Array<{ question: string; answer: string }>;
   flashcards: Array<{ front: string; back: string }>;
 } {
-  const text = [title, description, ...blocks.map((block) => block.text)]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Titles and headings have no closing punctuation; joined as-is they glued
+  // onto the next sentence ("...about Marathon Another big overhaul..."). End
+  // every block as a sentence, then drop sentences that are only the title.
+  const text = [description, ...blocks.map((block) => block.text)]
+    .map((part) => part?.replace(/\s+/g, " ").trim())
+    .filter((part): part is string => Boolean(part))
+    .map((part) => (/[.!?]["'”’)\]]?$/.test(part) ? part : `${part}.`))
+    .join(" ");
+  const normalizedTitle = title.replace(/\s+/g, " ").trim().toLowerCase();
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 25);
+    .filter((sentence) => sentence.length > 25 && sentence.replace(/[.!?]$/, "").toLowerCase() !== normalizedTitle);
   const summary = sentences.slice(0, 2).join(" ").slice(0, 900) || description || title;
-  const keyPoints = uniqueStrings(sentences.filter((sentence) => sentence !== title).slice(0, 4));
+  const keyPoints = uniqueStrings(sentences.slice(0, 4));
   const points = keyPoints.length ? keyPoints : [summary];
   return {
     summary,
@@ -1288,11 +1311,29 @@ function learningDataForContent(
       question: questionForPoint(point, title, index),
       answer: point
     })),
-    flashcards: points.slice(0, 4).map((point, index) => ({
+    flashcards: points.slice(0, 4).map((point, index) => clozeFlashcard(point) ?? {
       front: flashcardPromptForPoint(point, title, index),
       back: point
-    }))
+    })
   };
+}
+
+/**
+ * Fill-in-the-blank card from one sentence: blank a number, then a name, then
+ * the longest word. Always grammatical, unlike templated questions.
+ */
+function clozeFlashcard(point: string): { front: string; back: string } | undefined {
+  const words = point.split(/\s+/);
+  const clean = (word: string) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, "");
+  const number = words.map(clean).find((word) => /^\d[\d,.]*%?$/.test(word));
+  const name = words.slice(1).map(clean).find((word) => /^\p{Lu}[\p{L}'’-]{2,}$/u.test(word));
+  const longest = words.map(clean).filter((word) => /^\p{L}{6,}$/u.test(word)).sort((a, b) => b.length - a.length)[0];
+  const answer = number ?? name ?? longest;
+  if (!answer) return undefined;
+  const index = point.indexOf(answer);
+  if (index < 0) return undefined;
+  const clozed = `${point.slice(0, index)}_____${point.slice(index + answer.length)}`;
+  return { front: `Fill in the blank: ${clozed}`, back: `${answer} — ${point}` };
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -1382,3 +1423,5 @@ function normalizeArticlesPerFeed(value: number | undefined): number {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+export const __contentInternals = { extractMetadata, attrValue, savedPageTitle, learningDataForContent };

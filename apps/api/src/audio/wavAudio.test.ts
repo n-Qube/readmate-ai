@@ -18,6 +18,32 @@ describe("mergeWavAudioParts", () => {
     expect(() => mergeWavAudioParts([Buffer.from("not audio")])).toThrow("valid WAV");
   });
 
+  it("accepts streamed WAV whose RIFF and data sizes are the 0xFFFFFFFF placeholder", () => {
+    // Khaya's streaming TTS sends the header before it knows the audio length.
+    const streamed = testWav(300);
+    streamed.writeUInt32LE(0xffffffff, 4);
+    streamed.writeUInt32LE(0xffffffff, 40);
+    const parsed = __wavAudioInternals.parseWav(mergeWavAudioParts([streamed, testWav(400)], 0));
+
+    expect(parsed.data.length).toBe(16);
+    expect(parsed.data.readInt16LE(0)).toBe(300);
+    expect(parsed.data.readInt16LE(parsed.data.length - 2)).toBe(400);
+  });
+
+  it("drops a trailing partial sample from streamed WAV data", () => {
+    const streamed = Buffer.concat([testWav(500), Buffer.from([1])]);
+    streamed.writeUInt32LE(0xffffffff, 40);
+
+    expect(__wavAudioInternals.parseWav(streamed).data.length).toBe(8);
+  });
+
+  it("still rejects a truncated chunk before the audio data", () => {
+    const broken = testWav(100);
+    broken.writeUInt32LE(0xffffffff, 16);
+
+    expect(() => __wavAudioInternals.parseWav(broken)).toThrow("truncated WAV");
+  });
+
   it("encodes offline float samples as a valid mono PCM WAV", () => {
     const wav = encodePcm16MonoWav(new Float32Array([-1, -0.5, 0, 0.5, 1, Number.NaN]), 22_050);
     const parsed = __wavAudioInternals.parseWav(wav);

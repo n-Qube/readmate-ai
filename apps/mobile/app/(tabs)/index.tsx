@@ -37,6 +37,7 @@ export default function HomeScreen() {
   return (
     <Screen
       bottomNavigation="/(tabs)"
+      narrow
       contentContainerStyle={{ gap: isTablet ? 28 : 12 }}
       refreshControl={<RefreshControl refreshing={documentsQuery.isRefetching} onRefresh={() => void documentsQuery.refetch()} />}
     >
@@ -50,7 +51,7 @@ export default function HomeScreen() {
         </Text>
       </View>
 
-      <View style={{ width: "100%", maxWidth: isTablet ? 650 : undefined, alignSelf: "center" }}>
+      <View style={{ width: "100%", alignSelf: "center" }}>
         <PlaybackBar
           document={activeDocument}
           queue={documents}
@@ -78,8 +79,14 @@ export default function HomeScreen() {
             key={document.id}
             document={document}
             targetLanguage={settings?.targetLanguage ?? "en"}
+            livePercent={playback.activeDocument?.id === document.id ? playback.percent : undefined}
+            playing={playback.activeDocument?.id === document.id && ["playing", "loading", "buffering"].includes(playback.state)}
             onOpen={() => router.push({ pathname: "/document/[id]", params: { id: document.id } })}
-            onPlay={() => playDocument(document)}
+            onPlay={() => {
+              const isPlaying = playback.activeDocument?.id === document.id && ["playing", "loading", "buffering"].includes(playback.state);
+              if (isPlaying) void playback.pause();
+              else playDocument(document);
+            }}
           />
         ))}
       </View>
@@ -116,16 +123,22 @@ function HomeAction({ label, icon, onPress }: { label: string; icon: AppIconName
 function ContinueRow({
   document,
   targetLanguage,
+  livePercent,
+  playing = false,
   onOpen,
   onPlay
 }: {
   document: ReadingDocument;
   targetLanguage: UserSettings["targetLanguage"];
+  /** Progress from the player while this document is the active one. */
+  livePercent?: number;
+  playing?: boolean;
   onOpen: () => void;
   onPlay: () => void;
 }) {
   const duration = estimateListeningSeconds(document);
-  const elapsed = Math.round(duration * (Math.min(100, Math.max(0, document.progress.percent)) / 100));
+  const percent = livePercent ?? document.progress.percent;
+  const elapsed = Math.round(duration * (Math.min(100, Math.max(0, percent)) / 100));
   return (
     <View style={{ minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 2, borderBottomWidth: 1, borderBottomColor: colors.border }}>
       <Pressable accessibilityRole="button" accessibilityLabel={`Open ${document.title}`} onPress={onOpen}>
@@ -141,14 +154,11 @@ function ContinueRow({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Play ${document.title}`}
+        accessibilityLabel={`${playing ? "Pause" : "Play"} ${document.title}`}
         onPress={onPlay}
         style={({ pressed }) => ({ width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: radius.pill, backgroundColor: pressed ? colors.bgAlt : colors.surfaceSoft })}
       >
-        <AppIcon name="play.fill" size={16} color={colors.player} weight="bold" />
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`More options for ${document.title}`} style={{ width: 24, height: 34, alignItems: "center", justifyContent: "center" }}>
-        <AppIcon name="ellipsis" size={20} color={colors.faint} />
+        <AppIcon name={playing ? "pause.fill" : "play.fill"} size={16} color={colors.player} weight="bold" />
       </Pressable>
     </View>
   );

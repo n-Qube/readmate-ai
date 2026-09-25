@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, fetchWithRetry, generateDocumentLearning, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, listHistory, listLibrary, markRemoteFlashcardReview, requestTtsAudio, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError } from "./client";
+import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, fetchWithRetry, generateDocumentLearning, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, listHistory, listLibrary, markRemoteFlashcardReview, requestTtsAudio, studyFallbackNotice, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError } from "./client";
 import type { ExtensionSettings, ReadingChunk, ReadingDocument } from "../shared/types";
 
 const settings: ExtensionSettings = {
@@ -486,6 +486,15 @@ describe("sync client", () => {
     )).rejects.toThrow("Unable to generate speech: Text-to-speech is temporarily unavailable.");
   });
 
+  it("requests neutral-rate Gemini speech because playback applies the listener's speed", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(new Blob(["wav"]), { status: 200, headers: { "Content-Type": "audio/wav" } }));
+
+    await requestTtsAudio({ ...settings, ttsProvider: "gemini-lite", voice: "Aoede", speed: 1.5 }, "token", "Hello");
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({ provider: "gemini-lite", voice: "Aoede", speed: 1 });
+  });
+
   it("loads the signed-in account's document limits", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       plan: "free",
@@ -769,3 +778,14 @@ class FakeXMLHttpRequest {
     this.onload?.();
   }
 }
+
+describe("study fallback notice", () => {
+  it("is silent for AI-generated study material", () => {
+    expect(studyFallbackNotice({ fallback: false, preserved: false })).toBeNull();
+  });
+
+  it("explains quick notes and a kept study set differently", () => {
+    expect(studyFallbackNotice({ fallback: true, preserved: false })).toMatch(/quick study notes/);
+    expect(studyFallbackNotice({ fallback: true, preserved: true })).toMatch(/saved study set was kept/);
+  });
+});

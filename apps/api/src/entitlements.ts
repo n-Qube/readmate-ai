@@ -106,7 +106,7 @@ export function entitlementForPlan(plan: ReadMatePlan): ReadMateEntitlement {
 
 export function requirePremiumAudio(entitlement: ReadMateEntitlement): void {
   if (!entitlement.features.premiumAudio) {
-    throw new PremiumRequiredError("premium_audio", "Cartesia natural voices require ReadMate Premium.");
+    throw new PremiumRequiredError("premium_audio", "Gemini Flash natural voices require ReadMate Premium.");
   }
 }
 

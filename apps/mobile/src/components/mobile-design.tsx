@@ -49,6 +49,8 @@ export const radius = {
 export const tabBarBottomInset = 124;
 export const phoneContentMaxWidth = 560;
 export const tabletContentMaxWidth = 1080;
+/** Single-column pages (home, settings, lists) stay readable on desktop. */
+export const readingContentMaxWidth = 760;
 
 export const displayText = {
   fontFamily: "Georgia",
@@ -64,9 +66,10 @@ export const shadows = {
 
 type ScreenProps = ScrollViewProps & {
   bottomNavigation?: RootDestination | true;
+  narrow?: boolean;
 };
 
-export function Screen({ children, contentContainerStyle, bottomNavigation, ...props }: ScreenProps) {
+export function Screen({ children, contentContainerStyle, bottomNavigation, narrow = false, ...props }: ScreenProps) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const tablet = width >= 768;
@@ -79,7 +82,7 @@ export function Screen({ children, contentContainerStyle, bottomNavigation, ...p
         contentContainerStyle={[
           {
             width: "100%",
-            maxWidth: tablet ? tabletContentMaxWidth : phoneContentMaxWidth,
+            maxWidth: tablet ? (narrow ? readingContentMaxWidth : tabletContentMaxWidth) : phoneContentMaxWidth,
             alignSelf: "center",
             paddingHorizontal: tablet ? 28 : 18,
             paddingTop: (tablet ? 22 : 6) + (Platform.OS === "android" ? insets.top : 0),

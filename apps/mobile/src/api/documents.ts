@@ -6,7 +6,7 @@ import { speechCacheFileKey } from "@/utils/speech-cache-key";
 import { normalizeUploadedDocumentForDisplay } from "@/utils/upload-filename";
 
 export async function getDocuments(token: string | null): Promise<ReadingDocument[]> {
-  const documents = screenshotMode ? mockDocuments : await fetchJson<ReadingDocument[]>("/api/documents", token);
+  const documents = screenshotMode ? mockDocuments : await fetchJson<ReadingDocument[]>("/api/documents?view=summary", token);
   return documents.map(normalizeUploadedDocumentForDisplay);
 }
 
@@ -26,7 +26,8 @@ export function updateDocumentProgress(
     const document = mockDocuments.find((item) => item.id === documentId) ?? mockDocuments[0];
     return Promise.resolve({ ...document, progress });
   }
-  return fetchJson<ReadingDocument>(`/api/documents/${encodeURIComponent(documentId)}/progress`, token, {
+  // The caller already holds the text; ask for the small response (no blocks).
+  return fetchJson<ReadingDocument>(`/api/documents/${encodeURIComponent(documentId)}/progress?view=summary`, token, {
     method: "PATCH",
     body: JSON.stringify({ progress })
   });
@@ -220,17 +221,6 @@ export type TtsVoiceOption = {
   gender?: string;
 };
 
-export function getCartesiaVoices(token: string | null): Promise<TtsVoiceOption[]> {
-  if (screenshotMode) {
-    return Promise.resolve([
-      { id: "cartesia-default", name: "Natural default", description: "Your configured Cartesia voice." },
-      { id: "cartesia-warm", name: "Warm narrator", description: "A calm, conversational reading voice." },
-      { id: "cartesia-clear", name: "Clear guide", description: "A bright, focused reading voice." }
-    ]);
-  }
-  return fetchJson<{ voices: TtsVoiceOption[] }>("/api/tts/voices", token).then((response) => response.voices);
-}
-
 export function getNotes(token: string | null, documentId: string): Promise<ReadingNote[]> {
   if (screenshotMode) return Promise.resolve(mockNotes.filter((item) => item.documentId === documentId));
   return fetchJson<ReadingNote[]>(`/api/notes?documentId=${encodeURIComponent(documentId)}`, token);
@@ -315,13 +305,22 @@ export type LearningGenerationOptions = {
   targetLanguage?: UserSettings["targetLanguage"];
 };
 
+export type StudyGenerationResult = {
+  document: ReadingDocument;
+  syncPending?: boolean;
+  /** The AI service was unavailable, so the server used quick notes from the text. */
+  fallback?: boolean;
+  /** On fallback, the existing saved study set was kept instead of replaced. */
+  preserved?: boolean;
+};
+
 export function generateDocumentLearning(
   token: string | null,
   documentId: string,
   options: LearningGenerationOptions = {}
-): Promise<{ document: ReadingDocument; syncPending?: boolean }> {
+): Promise<StudyGenerationResult> {
   if (screenshotMode) return Promise.resolve({ document: mockDocuments.find((item) => item.id === documentId) ?? mockDocuments[0] });
-  return fetchJson<{ document: ReadingDocument; syncPending?: boolean }>(`/api/learning/${encodeURIComponent(documentId)}/summary`, token, {
+  return fetchJson<StudyGenerationResult>(`/api/learning/${encodeURIComponent(documentId)}/summary`, token, {
     method: "POST",
     body: JSON.stringify(options)
   });
@@ -381,7 +380,7 @@ export type CreateSpeechAudioFileInput = {
 };
 
 const speechFilePromises = new Map<string, Promise<string>>();
-const SPEECH_AUDIO_CACHE_VERSION = "v3-wav-merge";
+const SPEECH_AUDIO_CACHE_VERSION = "v4-neutral-rate";
 
 export async function createSpeechAudioFile(token: string | null, input: CreateSpeechAudioFileInput): Promise<string> {
   if (screenshotMode) throw new ApiError("Audio playback is disabled in screenshot mode.", 503);
