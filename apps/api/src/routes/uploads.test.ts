@@ -30,7 +30,7 @@ function createTestApp(repository: UploadRepository, storage: UploadStorage, doc
   return app;
 }
 
-function createMemoryRepository(): UploadRepository {
+function createMemoryRepository(documentRepository?: DocumentRepository, options: { fenced?: boolean } = {}): UploadRepository {
   const uploads = new Map<string, UploadRecordResponse>();
   let nextId = 1;
 
@@ -66,6 +66,23 @@ function createMemoryRepository(): UploadRepository {
       if (!upload || upload.userId !== userId) return false;
       uploads.delete(uploadId);
       return true;
+    },
+    // Mirrors the Prisma transaction: create, then bind only if still unbound;
+    // a loser "rolls back" its document and returns the winner's.
+    async createBoundDocument(userId, uploadId, input) {
+      if (!documentRepository) throw new Error("test repository has no document repository");
+      if (options.fenced) throw new Error("ACCOUNT_DELETION_IN_PROGRESS");
+      const document = await documentRepository.createDocument(userId, input);
+      const upload = uploads.get(uploadId) as (UploadRecordResponse & { userId: string }) | undefined;
+      if (!upload || upload.userId !== userId) throw new Error("upload not found");
+      if (upload.documentId) {
+        await documentRepository.deleteDocument(userId, document.id);
+        const winner = await documentRepository.getDocument(userId, upload.documentId);
+        if (!winner) throw new Error("bound document missing");
+        return { document: winner, created: false };
+      }
+      uploads.set(uploadId, { ...upload, documentId: document.id });
+      return { document, created: true };
     }
   };
 }
@@ -157,8 +174,11 @@ function createMemoryDocumentRepository(): DocumentRepository {
     async clearHistory() {
       return 0;
     },
-    async deleteDocument() {
-      return false;
+    async deleteDocument(userId, documentId) {
+      const document = documents.get(documentId);
+      if (document?.userId !== userId) return false;
+      documents.delete(documentId);
+      return true;
     },
     async deleteCompletedDocuments() {
       return 0;
@@ -258,6 +278,7 @@ describe("uploadsRouter", () => {
 
   it("creates a readable PDF document from an uploaded file", async () => {
     const documentRepository = createMemoryDocumentRepository();
+    repository = createMemoryRepository(documentRepository);
     const app = createTestApp(repository, storage, documentRepository);
     const created = await request(app)
       .post("/api/uploads/pdf/sign")
@@ -342,5 +363,85 @@ describe("uploadsRouter", () => {
       .set("x-test-user", "owner")
       .send({ filename: "notes.txt", mimeType: "text/plain", byteSize: 100 })
       .expect(400);
+  });
+
+  describe("PDF conversion is idempotent per upload (RM-02)", () => {
+    async function signedUpload(app: ReturnType<typeof createTestApp>) {
+      const created = await request(app)
+        .post("/api/uploads/pdf/sign")
+        .set("x-test-user", "owner")
+        .send({ filename: "lecture-notes.pdf", mimeType: "application/pdf", byteSize: 1024 })
+        .expect(201);
+      return created.body.id as string;
+    }
+    const body = { title: "Lecture notes", provider: "google", voice: "en-US-Neural2-J", speed: 1 };
+
+    it("returns the same document when the conversion is repeated", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const app = createTestApp(repository, storage, documentRepository);
+      const uploadId = await signedUpload(app);
+
+      const first = await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body).expect(201);
+      const retry = await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body).expect(200);
+
+      expect(retry.body.id).toBe(first.body.id);
+      expect(await documentRepository.listDocuments("owner")).toHaveLength(1);
+    });
+
+    it("gives simultaneous conversions one winning document", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const app = createTestApp(repository, storage, documentRepository);
+      const uploadId = await signedUpload(app);
+
+      const responses = await Promise.all([1, 2, 3].map(() =>
+        request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body)
+      ));
+
+      const ids = new Set(responses.map((response) => response.body.id));
+      expect(ids.size).toBe(1);
+      expect(responses.filter((response) => response.status === 201)).toHaveLength(1);
+      expect(responses.every((response) => response.status === 201 || response.status === 200)).toBe(true);
+      expect(await documentRepository.listDocuments("owner")).toHaveLength(1);
+      expect((await repository.getUpload("owner", uploadId))?.documentId).toBe([...ids][0]);
+    });
+
+    it("returns the canonical document for a retry with different settings", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const app = createTestApp(repository, storage, documentRepository);
+      const uploadId = await signedUpload(app);
+
+      const first = await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body).expect(201);
+      const changed = await request(app)
+        .post(`/api/uploads/${uploadId}/pdf/document`)
+        .set("x-test-user", "owner")
+        .send({ ...body, title: "Renamed", speed: 1.5 })
+        .expect(200);
+
+      expect(changed.body).toMatchObject({ id: first.body.id, title: "Lecture notes", speed: 1 });
+    });
+
+    it("does not convert another user's upload", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository);
+      const app = createTestApp(repository, storage, documentRepository);
+      const uploadId = await signedUpload(app);
+
+      await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "intruder").send(body).expect(404);
+      expect(await documentRepository.listDocuments("intruder")).toHaveLength(0);
+    });
+
+    it("refuses conversion for an account that is being deleted", async () => {
+      const documentRepository = createMemoryDocumentRepository();
+      repository = createMemoryRepository(documentRepository, { fenced: true });
+      const app = createTestApp(repository, storage, documentRepository);
+      const uploadId = await signedUpload(app);
+
+      const response = await request(app).post(`/api/uploads/${uploadId}/pdf/document`).set("x-test-user", "owner").send(body).expect(409);
+      expect(response.body.error).toMatch(/being deleted/i);
+      expect(await documentRepository.listDocuments("owner")).toHaveLength(0);
+    });
   });
 });

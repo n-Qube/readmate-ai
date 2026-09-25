@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { Response, Router } from "express";
 import { Router as createRouter } from "express";
 import { z } from "zod";
@@ -518,50 +519,8 @@ export class PrismaDocumentRepository implements DocumentRepository {
         return serializeDocument(refreshed);
       }
     }
-    const category = categoryForDocument(input);
-    const learningData = learningDataForDocument(input);
     const document = await prisma.readingDocument.create({
-      data: {
-        userId,
-        title: input.title,
-        sourceType: input.sourceType,
-        sourceUrl: input.sourceUrl,
-        canonicalUrl: input.canonicalUrl,
-        rssFeedUrl: input.rssFeedUrl,
-        dedupeKey: input.dedupeKey,
-        category,
-        sourceLabel: input.sourceLabel,
-        thumbnailUrl: input.thumbnailUrl,
-        coverImageUrl: input.coverImageUrl,
-        author: input.author,
-        description: input.description,
-        contentHtml: input.contentHtml,
-        topicTags: JSON.stringify(input.topicTags ?? inferTopicTags(input, category)),
-        estimatedListeningSeconds: input.estimatedListeningSeconds,
-        pageCount: input.pageCount,
-        status: input.status ?? statusForProgress(input.progress.percent),
-        summary: input.summary ?? learningData.summary,
-        keyPoints: JSON.stringify(input.keyPoints ?? learningData.keyPoints),
-        quizQuestions: JSON.stringify(input.quizQuestions ?? learningData.quizQuestions),
-        flashcards: JSON.stringify(input.flashcards ?? learningData.flashcards),
-        chunkIndex: input.progress.blockIndex,
-        characterOffset: input.progress.characterOffset,
-        sentenceIndex: input.progress.sentenceIndex,
-        percent: input.progress.percent,
-        lastReadAt: input.progress.percent > 0 ? new Date() : null,
-        provider: input.provider,
-        voice: input.voice,
-        speed: input.speed,
-        blocks: {
-          create: input.blocks.map((block, index) => ({
-            orderIndex: block.orderIndex ?? index,
-            blockType: block.blockType,
-            text: block.text,
-            sourceSelector: block.sourceSelector,
-            sourcePageNumber: block.sourcePageNumber
-          }))
-        }
-      },
+      data: readingDocumentCreateData(userId, input),
       include: documentInclude
     });
     return serializeDocument(document);
@@ -878,6 +837,55 @@ export class PrismaDocumentRepository implements DocumentRepository {
     return result.count;
   }
 }
+
+/** Create payload shared by createDocument and the upload conversion transaction. */
+export function readingDocumentCreateData(userId: string, input: CreateDocumentInput) {
+  const category = categoryForDocument(input);
+  const learningData = learningDataForDocument(input);
+  return {
+    userId,
+    title: input.title,
+    sourceType: input.sourceType,
+    sourceUrl: input.sourceUrl,
+    canonicalUrl: input.canonicalUrl,
+    rssFeedUrl: input.rssFeedUrl,
+    dedupeKey: input.dedupeKey,
+    category,
+    sourceLabel: input.sourceLabel,
+    thumbnailUrl: input.thumbnailUrl,
+    coverImageUrl: input.coverImageUrl,
+    author: input.author,
+    description: input.description,
+    contentHtml: input.contentHtml,
+    topicTags: JSON.stringify(input.topicTags ?? inferTopicTags(input, category)),
+    estimatedListeningSeconds: input.estimatedListeningSeconds,
+    pageCount: input.pageCount,
+    status: input.status ?? statusForProgress(input.progress.percent),
+    summary: input.summary ?? learningData.summary,
+    keyPoints: JSON.stringify(input.keyPoints ?? learningData.keyPoints),
+    quizQuestions: JSON.stringify(input.quizQuestions ?? learningData.quizQuestions),
+    flashcards: JSON.stringify(input.flashcards ?? learningData.flashcards),
+    chunkIndex: input.progress.blockIndex,
+    characterOffset: input.progress.characterOffset,
+    sentenceIndex: input.progress.sentenceIndex,
+    percent: input.progress.percent,
+    lastReadAt: input.progress.percent > 0 ? new Date() : null,
+    provider: input.provider,
+    voice: input.voice,
+    speed: input.speed,
+    blocks: {
+      create: input.blocks.map((block, index) => ({
+        orderIndex: block.orderIndex ?? index,
+        blockType: block.blockType,
+        text: block.text,
+        sourceSelector: block.sourceSelector,
+        sourcePageNumber: block.sourcePageNumber
+      }))
+    }
+  } satisfies Prisma.ReadingDocumentUncheckedCreateInput;
+}
+
+export { documentInclude, serializeDocument };
 
 const documentInclude = {
   blocks: {

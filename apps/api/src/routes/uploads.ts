@@ -7,7 +7,7 @@ import type { prisma as PrismaSingleton } from "../prisma.js";
 import { extractPdfTextBlocks, isPdfBytes, type ExtractedPdfBlock, type PdfExtractionLimits } from "../pdf/extractPdfText.js";
 import { getSupabaseAdminClient, getUploadBucket, toPlainUint8Array } from "../storage.js";
 import { normalizeGoogleTtsVoice } from "../ttsSchema.js";
-import { PrismaDocumentRepository, type DocumentRepository } from "./documents.js";
+import { PrismaDocumentRepository, type CreateDocumentInput, type DocumentRepository, type ReadingDocumentResponse } from "./documents.js";
 import { documentProcessingLimiter, type WorkLimiter, type WorkPermit } from "../workLimiter.js";
 import { entitlementForRequest, requireDocumentWithinPlan, type MaybePromise, type ReadMateEntitlement } from "../entitlements.js";
 
@@ -39,7 +39,9 @@ const createPdfDocumentSchema = z.object({
 });
 
 class UploadValidationError extends Error {
-  readonly statusCode = 400;
+  constructor(message: string, readonly statusCode = 400) {
+    super(message);
+  }
 }
 
 export class UploadQuotaError extends Error {
@@ -80,6 +82,12 @@ export type UploadRepository = {
   createUpload(userId: string, input: CreatePdfUploadInput, storageKey: string): Promise<UploadRecordResponse>;
   getUpload(userId: string, uploadId: string): Promise<UploadRecordResponse | null>;
   attachDocument(userId: string, uploadId: string, documentId: string): Promise<UploadRecordResponse | null>;
+  /**
+   * Creates the document and binds it to the upload atomically. If another
+   * request bound the upload first, this call's document is rolled back and
+   * the winner's is returned with created: false.
+   */
+  createBoundDocument(userId: string, uploadId: string, input: CreateDocumentInput): Promise<{ document: ReadingDocumentResponse; created: boolean }>;
   deleteUpload(userId: string, uploadId: string): Promise<boolean>;
   listExpiredPendingUploads?(userId: string, olderThan: Date): Promise<UploadRecordResponse[]>;
 };
@@ -164,15 +172,24 @@ export function uploadsRouter(deps: UploadsRouterDeps = {}): Router {
   router.post("/:id/pdf/document", async (req: AuthedRequest, res: Response, next: NextFunction) => {
     let releasePermit: WorkPermit | undefined;
     try {
+      const upload = await repository.getUpload(getUserId(req), String(req.params.id));
+      if (!upload) {
+        res.status(404).json({ error: "Upload not found." });
+        return;
+      }
+      // The upload is the conversion identity: a retry, a lost response, or a
+      // repeat with different settings returns the document already made.
+      if (upload.documentId) {
+        const existing = await documentRepository.getDocument(getUserId(req), upload.documentId);
+        if (existing) {
+          res.status(200).json(existing);
+          return;
+        }
+      }
       releasePermit = workLimiter.tryAcquire() ?? undefined;
       if (!releasePermit) {
         res.setHeader("Retry-After", "5");
         res.status(503).json({ error: "Document processing is busy. Please retry shortly." });
-        return;
-      }
-      const upload = await repository.getUpload(getUserId(req), String(req.params.id));
-      if (!upload) {
-        res.status(404).json({ error: "Upload not found." });
         return;
       }
 
@@ -204,7 +221,7 @@ export function uploadsRouter(deps: UploadsRouterDeps = {}): Router {
         textCharacters: blocks.reduce((total, block) => total + block.text.length, 0)
       });
 
-      const document = await documentRepository.createDocument(getUserId(req), {
+      const { document, created } = await repository.createBoundDocument(getUserId(req), upload.id, {
         title: payload.title ?? upload.filename.replace(/\.pdf$/i, ""),
         sourceType: "pdf",
         category: "Documents",
@@ -217,10 +234,13 @@ export function uploadsRouter(deps: UploadsRouterDeps = {}): Router {
         progress: { blockIndex: 0, characterOffset: 0, sentenceIndex: 0, percent: 0 },
         blocks
       });
-      await repository.attachDocument(getUserId(req), upload.id, document.id);
 
-      res.status(201).json(document);
+      res.status(created ? 201 : 200).json(document);
     } catch (error) {
+      if (isAccountDeletionFenceError(error)) {
+        res.status(409).json({ error: "This account is being deleted, so the document was not created." });
+        return;
+      }
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.issues[0]?.message ?? "Invalid PDF document request." });
         return;
@@ -333,6 +353,34 @@ export class PrismaUploadRepository implements UploadRepository {
     return serializeUpload(upload);
   }
 
+  async createBoundDocument(userId: string, uploadId: string, input: CreateDocumentInput): Promise<{ document: ReadingDocumentResponse; created: boolean }> {
+    const { withRlsTransaction } = await import("../prisma.js");
+    const { readingDocumentCreateData, documentInclude, serializeDocument } = await import("./documents.js");
+    try {
+      const document = await withRlsTransaction(async (tx) => {
+        const created = await tx.readingDocument.create({ data: readingDocumentCreateData(userId, input), include: documentInclude });
+        // Conditional bind: under READ COMMITTED a concurrent binder blocks on
+        // the row lock, then re-checks "documentId" IS NULL and matches nothing.
+        const bound = await tx.$executeRaw`
+          UPDATE "UploadedFile" SET "documentId" = ${created.id}
+          WHERE "id" = ${uploadId} AND "userId" = ${userId} AND "documentId" IS NULL
+        `;
+        if (bound !== 1) throw new ConversionAlreadyBoundError();
+        return created;
+      });
+      return { document: serializeDocument(document), created: true };
+    } catch (error) {
+      if (!(error instanceof ConversionAlreadyBoundError)) throw error;
+      const prisma = await getPrisma();
+      const upload = await prisma.uploadedFile.findFirst({ where: { id: uploadId, userId }, select: { documentId: true } });
+      const winner = upload?.documentId
+        ? await prisma.readingDocument.findFirst({ where: { id: upload.documentId, userId, deletedAt: null }, include: documentInclude })
+        : null;
+      if (!winner) throw new UploadValidationError("This upload was converted, but its document is no longer available.", 409);
+      return { document: serializeDocument(winner), created: false };
+    }
+  }
+
   async deleteUpload(userId: string, uploadId: string): Promise<boolean> {
     const prisma = await getPrisma();
     const result = await prisma.uploadedFile.deleteMany({ where: { id: uploadId, userId } });
@@ -405,4 +453,13 @@ function estimateListeningSeconds(blocks: Array<{ text: string }>, speed: number
 function uploadLimitFromEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+class ConversionAlreadyBoundError extends Error {
+  readonly name = "ConversionAlreadyBoundError";
+}
+
+/** The ReadingDocument trigger raises this while an account deletion is in progress. */
+function isAccountDeletionFenceError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("ACCOUNT_DELETION_IN_PROGRESS");
 }
