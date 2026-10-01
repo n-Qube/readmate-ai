@@ -16,6 +16,7 @@ const dynamicRouteAdapters = Object.freeze({
 });
 const requiredFriendlyRoutes = Object.freeze([
   "/",
+  "/callback",
   "/library",
   "/history",
   "/study",

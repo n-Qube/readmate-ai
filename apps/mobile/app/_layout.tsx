@@ -83,6 +83,7 @@ function PrincipalScopedApp() {
           <StatusBar style="auto" />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="callback" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="document/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="player" options={{ headerShown: false, presentation: "modal" }} />

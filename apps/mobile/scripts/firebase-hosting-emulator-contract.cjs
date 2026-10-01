@@ -12,6 +12,7 @@ async function run() {
   assert.ok(publicRoot && path.isAbsolute(publicRoot), "emulator public directory must be absolute");
 
   await assertResponse({ origin, publicRoot, route: "/", status: 200, file: "index.html" });
+  await assertResponse({ origin, publicRoot, route: "/callback?test=handoff", status: 200, file: "callback.html" });
   await assertResponse({ origin, publicRoot, route: "/library", status: 200, file: "library.html" });
   await assertResponse({ origin, publicRoot, route: "/challenge", status: 200, file: "challenge.html" });
   await assertResponse({ origin, publicRoot, route: "/challenge-demo", status: 200, file: "challenge-demo.html" });
