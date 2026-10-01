@@ -20,7 +20,7 @@ import { isLikelyPdfUrl, pdfSourceUrlFromTab } from "./pdfTab";
 import { adjacentChunkIndex, type ChunkDirection } from "./playbackNavigation";
 import { languageProviderLabel } from "./providerLabel";
 import { parseSidePanelRoute, SIDE_PANEL_ROUTE_KEY, type SidePanelTab } from "./sidepanelRoute";
-import { type SpeechSource } from "./speechDisclosure";
+import { syntheticSpeechDisclosure, type SpeechSource } from "./speechDisclosure";
 import { STUDY_AI_DISCLOSURE } from "./studyDisclosure";
 import { resolveLearningTarget } from "./studyTarget";
 import { deriveSyncState } from "./syncState";
@@ -104,7 +104,7 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
   const [quizAnswers, setQuizAnswers] = useState<boolean[]>([]);
   const [quizAnswerValues, setQuizAnswerValues] = useState<string[]>([]);
   const [quizSelected, setQuizSelected] = useState<number | null>(null);
-  const [, setSpeechSource] = useState<SpeechSource>("cloud");
+  const [speechSource, setSpeechSource] = useState<SpeechSource>("cloud");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
@@ -1963,7 +1963,7 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
                 <p className="player-excerpt">{currentExcerpt}</p>
               ) : null}
 
-              <div className="controls" aria-label="Playback controls">
+              <div className="controls" role="group" aria-label={`Playback controls. ${syntheticSpeechDisclosure(speechSource, languageProviderLabel(settings.targetLanguage, settings.ttsProvider))}`}>
                 <button
                   onClick={() => void playAdjacentChunk(-1)}
                   disabled={player.currentChunkIndex <= 0}
