@@ -1201,27 +1201,6 @@ h2 { display: flex; gap: 8px; align-items: center; font-size: 16px; line-height:
   -webkit-box-orient: vertical;
 }
 
-.player-speech-disclosure {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.player-speech-disclosure svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
-  margin-top: 1px;
-  color: #8ee7dc;
-}
-
 /* Controls on dark player card */
 .player-card .controls button {
   background: rgba(255, 255, 255, 0.10);

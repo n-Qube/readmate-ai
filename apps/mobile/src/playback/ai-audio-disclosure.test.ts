@@ -4,7 +4,7 @@ import {
   AI_AUDIO_DISCLOSURE_DETAIL,
   AI_AUDIO_DISCLOSURE_TITLE,
   aiAudioMetadataSubtitle,
-  compactAiAudioDisclosure,
+  compactPlaybackState,
   shouldShowAiAudioDisclosure
 } from "./ai-audio-disclosure";
 
@@ -17,9 +17,10 @@ describe("AI audio disclosure", () => {
     );
   });
 
-  it("keeps the compact player's playback state visible beside the disclosure", () => {
-    expect(compactAiAudioDisclosure("Paused")).toBe("AI-generated speech · Paused");
-    expect(compactAiAudioDisclosure("  ")).toBe("AI-generated speech");
+  it("shows only playback state in the compact player while retaining its status", () => {
+    expect(compactPlaybackState("Paused")).toBe("Paused");
+    expect(compactPlaybackState(" Completed ")).toBe("Completed");
+    expect(compactPlaybackState("  ")).toBe("Ready");
   });
 
   it("places the disclosure first in lock-screen and casting metadata", () => {
@@ -29,7 +30,7 @@ describe("AI audio disclosure", () => {
   });
 
   it.each(["featured", "compact", "expanded"] as const)(
-    "shows disclosure on the %s player only when a document is active",
+    "retains the accessibility disclosure hint for the %s player only when a document is active",
     (variant) => {
       expect(shouldShowAiAudioDisclosure(variant, true)).toBe(true);
       expect(shouldShowAiAudioDisclosure(variant, false)).toBe(false);
