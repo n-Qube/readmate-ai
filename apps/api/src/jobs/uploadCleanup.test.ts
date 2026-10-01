@@ -8,13 +8,11 @@ function deps(expired: ExpiredUpload[], options: { failDeleteFor?: string; bound
     deletedObjects,
     deletedRecords,
     listExpired: async () => expired,
-    deleteObject: async (key: string) => {
-      if (key === options.failDeleteFor) throw new Error("storage timeout");
-      deletedObjects.push(key);
-    },
-    deleteRecordIfPending: async (_userId: string, id: string) => {
-      if (options.boundIds?.includes(id)) return 0;
-      deletedRecords.push(id);
+    removeIfPending: async (upload: ExpiredUpload) => {
+      if (options.boundIds?.includes(upload.id)) return 0;
+      if (upload.storageKey === options.failDeleteFor) throw new Error("storage timeout");
+      deletedObjects.push(upload.storageKey);
+      deletedRecords.push(upload.id);
       return 1;
     }
   };
@@ -42,5 +40,7 @@ describe("cleanupExpiredUploads", () => {
   it("does not count an upload that was converted in the meantime", async () => {
     const d = deps(uploads, { boundIds: ["u2"] });
     expect(await cleanupExpiredUploads(d)).toEqual({ examined: 2, removed: 1, retained: 0 });
+    expect(d.deletedObjects).toEqual(["alice/a.pdf"]);
+    expect(d.deletedRecords).toEqual(["u1"]);
   });
 });

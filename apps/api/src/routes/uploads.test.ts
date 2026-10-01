@@ -61,6 +61,12 @@ function createMemoryRepository(documentRepository?: DocumentRepository, options
       uploads.set(uploadId, updated);
       return updated;
     },
+    async removePendingUpload(userId, candidate, deleteObject, cutoff) {
+      const upload = await this.getUpload(userId, candidate.id);
+      if (!upload || upload.documentId || upload.storageKey !== candidate.storageKey || (cutoff && new Date(upload.createdAt) >= cutoff)) return 0;
+      await deleteObject(upload.storageKey);
+      return Number(await this.deleteUpload(userId, upload.id));
+    },
     async deleteUpload(userId, uploadId) {
       const upload = uploads.get(uploadId) as (UploadRecordResponse & { userId: string }) | undefined;
       if (!upload || upload.userId !== userId) return false;

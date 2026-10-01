@@ -90,6 +90,7 @@ export type UploadRepository = {
    */
   createBoundDocument(userId: string, uploadId: string, input: CreateDocumentInput): Promise<{ document: ReadingDocumentResponse; created: boolean }>;
   deleteUpload(userId: string, uploadId: string): Promise<boolean>;
+  removePendingUpload(userId: string, upload: UploadRecordResponse, deleteObject: (key: string) => Promise<void>, cutoff?: Date): Promise<number>;
   listExpiredPendingUploads?(userId: string, olderThan: Date): Promise<UploadRecordResponse[]>;
 };
 
@@ -408,6 +409,14 @@ export class PrismaUploadRepository implements UploadRepository {
     const { readingDocumentCreateData, documentInclude, serializeDocument } = await import("./documents.js");
     try {
       const document = await withRlsTransaction(async (tx) => {
+        // Lock in the same order as cleanup and the account-deletion fence.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))`;
+        const uploads = await tx.$queryRaw<Array<{ cleanupStartedAt: Date | null }>>`
+          SELECT "cleanupStartedAt" FROM "UploadedFile"
+          WHERE "id" = ${uploadId} AND "userId" = ${userId} FOR UPDATE`;
+        if (!uploads.length || uploads[0].cleanupStartedAt) {
+          throw new UploadValidationError("This upload has expired or is being removed. Please upload the PDF again.", 409);
+        }
         const created = await tx.readingDocument.create({ data: readingDocumentCreateData(userId, input), include: documentInclude });
         // Conditional bind: under READ COMMITTED a concurrent binder blocks on
         // the row lock, then re-checks "documentId" IS NULL and matches nothing.
@@ -429,6 +438,11 @@ export class PrismaUploadRepository implements UploadRepository {
       if (!winner) throw new UploadValidationError("This upload was converted, but its document is no longer available.", 409);
       return { document: serializeDocument(winner), created: false };
     }
+  }
+
+  async removePendingUpload(userId: string, upload: UploadRecordResponse, deleteObject: (key: string) => Promise<void>, cutoff?: Date): Promise<number> {
+    const { removePendingUpload } = await import("../jobs/uploadCleanup.js");
+    return removePendingUpload({ id: upload.id, userId, storageKey: upload.storageKey }, deleteObject, cutoff);
   }
 
   async deleteUpload(userId: string, uploadId: string): Promise<boolean> {
@@ -460,11 +474,10 @@ async function removeInvalidUpload(
   storage: UploadStorage
 ): Promise<void> {
   try {
-    await storage.deleteFile(upload.storageKey);
+    await repository.removePendingUpload(userId, upload, (key) => storage.deleteFile(key));
   } catch {
     return;
   }
-  await repository.deleteUpload(userId, upload.id).catch(() => undefined);
 }
 
 async function cleanupExpiredPendingUploads(
@@ -477,8 +490,7 @@ async function cleanupExpiredPendingUploads(
   const expired = await repository.listExpiredPendingUploads(userId, olderThan);
   for (const upload of expired) {
     try {
-      await storage.deleteFile(upload.storageKey);
-      await repository.deleteUpload(userId, upload.id);
+      await repository.removePendingUpload(userId, upload, (key) => storage.deleteFile(key), olderThan);
     } catch {
       // Keep the record so quota enforcement continues to account for an object
       // that could not be confirmed deleted from storage.
