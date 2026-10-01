@@ -52,46 +52,54 @@ describe("parseTtsRequest", () => {
     });
   });
 
-  it("accepts Cartesia with a server-configured default voice", () => {
+  it.each(["gemini", "gemini-lite"] as const)("accepts %s with its default Gemini voice", (provider) => {
     expect(parseTtsRequest({
       text: "Read this naturally.",
-      provider: "cartesia"
+      provider
     })).toEqual({
       text: "Read this naturally.",
-      provider: "cartesia",
-      voice: "cartesia-default",
+      provider,
+      voice: "Kore",
       targetLanguage: "en",
       speed: 1
     });
   });
 
-  it("preserves an explicit Cartesia voice id", () => {
+  it("preserves a supported Gemini prebuilt voice", () => {
     expect(parseTtsRequest({
       text: "Read this naturally.",
-      provider: "cartesia",
-      voice: "voice_123"
-    })).toMatchObject({ provider: "cartesia", voice: "voice_123" });
+      provider: "gemini-lite",
+      voice: "Sulafat"
+    })).toMatchObject({ provider: "gemini-lite", voice: "Sulafat" });
   });
 
-  it("replaces a Google voice paired with Cartesia", () => {
-    expect(parseTtsRequest({
-      text: "Read this naturally.",
-      provider: "cartesia",
-      voice: "en-US-Neural2-J"
-    })).toMatchObject({ provider: "cartesia", voice: "cartesia-default" });
-  });
-
-  it.each(["khaya:ewe:female", "ghananlp-asante-twi"])(
-    "replaces local-language voice %s when paired with English Cartesia",
+  it.each(["en-US-Neural2-J", "voice_123", "khaya:ewe:female", "ghananlp-asante-twi"])(
+    "replaces unsupported voice %s paired with English Gemini",
     (voice) => {
       expect(parseTtsRequest({
         text: "Read this naturally.",
-        provider: "cartesia",
+        provider: "gemini",
         targetLanguage: "en",
         voice
-      })).toMatchObject({ provider: "cartesia", targetLanguage: "en", voice: "cartesia-default" });
+      })).toMatchObject({ provider: "gemini", targetLanguage: "en", voice: "Kore" });
     }
   );
+
+  it("migrates retired Cartesia requests to Gemini Flash TTS", () => {
+    expect(parseTtsRequest({
+      text: "Read this naturally.",
+      provider: "cartesia",
+      voice: "cartesia-default"
+    })).toMatchObject({ provider: "gemini", voice: "Kore" });
+  });
+
+  it("keeps a Gemini voice chosen by an older client that still sends Cartesia", () => {
+    expect(parseTtsRequest({
+      text: "Read this naturally.",
+      provider: "cartesia",
+      voice: "Charon"
+    })).toMatchObject({ provider: "gemini", voice: "Charon" });
+  });
 
   it("accepts the verified local languages for translation and Khaya TTS v2", () => {
     expect(

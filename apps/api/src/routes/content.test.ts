@@ -906,7 +906,8 @@ describe("contentRouter", () => {
       author: "Ada Writer",
       category: "Technology",
       status: "unread",
-      summary: expect.stringContaining("AI gadgets reshape work"),
+      // The heading is a sentence of its own now, not glued onto the body.
+      summary: expect.stringContaining("Artificial intelligence software"),
       keyPoints: expect.arrayContaining([expect.stringContaining("Artificial intelligence")]),
       quizQuestions: expect.arrayContaining([expect.objectContaining({ question: expect.any(String), answer: expect.any(String) })]),
       flashcards: expect.arrayContaining([expect.objectContaining({ front: expect.any(String), back: expect.any(String) })])

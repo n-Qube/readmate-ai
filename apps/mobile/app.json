@@ -86,6 +86,19 @@
           "backgroundColor": "#f3f7ff",
           "imageWidth": 180
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "text/*"
+          ],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true
+          },
+          "disableIOS": true
+        }
       ]
     ],
     "extra": {

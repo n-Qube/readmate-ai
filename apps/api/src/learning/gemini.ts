@@ -1,19 +1,45 @@
-import { askAnswerSchema, askJsonSchema, learningJsonSchema, learningPayloadSchema, type AskAnswer, type LearningPayload } from "./schema.js";
+import { askAnswerSchema, askJsonSchema, flashcardSetJsonSchema, flashcardSetSchema, learningJsonSchema, learningPayloadSchema, quizSetJsonSchema, quizSetSchema, type AskAnswer, type LearningPayload } from "./schema.js";
 import { fetchWithTimeout } from "../fetchWithTimeout.js";
 
 type GeminiResponse = {
   candidates?: Array<{
     content?: {
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
+    finishReason?: string;
   }>;
+  promptFeedback?: { blockReason?: string };
   error?: { message?: string };
 };
+
+// A full study pack (summary, 12 key points, 24 flashcards, 12 quiz items)
+// needs several thousand output tokens. On thinking models, thinking tokens
+// share this budget, so a tight cap truncated the JSON and forced fallback.
+const LEARNING_MAX_OUTPUT_TOKENS = 16_384;
+// Structured generation routinely outlasts the 15 s default for other
+// outbound calls; timing out here silently served extractive fallback.
+const DEFAULT_LEARNING_TIMEOUT_MS = 45_000;
 
 export type LearningGenerator = {
   generateLearning(input: { title: string; text: string; flashcardCount: number; quizCount: number }): Promise<LearningPayload>;
   answerQuestion(input: { title: string; text: string; question: string }): Promise<AskAnswer>;
+  /** Optional focused regeneration; routes fall back to generateLearning when absent. */
+  generateFlashcards?(input: { title: string; text: string; count: number }): Promise<LearningPayload["flashcards"]>;
+  generateQuiz?(input: { title: string; text: string; count: number }): Promise<LearningPayload["quiz"]>;
 };
+
+const GROUNDING_RULE = "Return concise, accurate study output based only on the provided text. Never add facts that are not supported by it.";
+const FLASHCARD_RULES = [
+  "Flashcards must teach. Do not use the document title, headline, or a copied sentence as the question.",
+  "Each flashcard question should test one specific concept, cause, figure, person, risk, claim, or implication from the document.",
+  "Each flashcard answer should be self-contained and one or two clear explanatory sentences, not a long pasted paragraph.",
+  "Avoid duplicate flashcards. Vary recall between facts, relationships, causes, consequences, comparisons, and implications."
+];
+const QUIZ_RULES = [
+  "Quiz questions must be answerable from the document. Multiple-choice questions need one unambiguously correct answer and plausible distractors that the document does not support.",
+  "Every quiz explanation must say why the correct answer follows from the document, not merely repeat the answer."
+];
+const COVERAGE_RULE = "For longer academic or research documents, spread material across the whole document and vary difficulty and quiz question types.";
 
 export class GeminiLearningGenerator implements LearningGenerator {
   constructor(
@@ -21,6 +47,7 @@ export class GeminiLearningGenerator implements LearningGenerator {
       apiKey?: string;
       model?: string;
       fetcher?: typeof fetch;
+      timeoutMs?: number;
     } = {}
   ) {}
 
@@ -28,22 +55,44 @@ export class GeminiLearningGenerator implements LearningGenerator {
     const prompt =
       [
         "Create study material for this ReadMate document.",
-        "Return concise, accurate study output based only on the provided text. Never add facts that are not supported by it.",
+        GROUNDING_RULE,
         `Create exactly ${input.flashcardCount} flashcards and exactly ${input.quizCount} quiz questions.`,
         "Key points must be distinct, specific, and useful for recall. Each key point should state one idea and why it matters in no more than two sentences.",
         "Do not repeat the headline, title, navigation text, publication boilerplate, or the same fact in different wording.",
         "Preserve important names, numbers, dates, claims, causes, risks, and conclusions exactly as the document presents them.",
-        "Flashcards must teach. Do not use the document title, headline, or a copied sentence as the question.",
-        "Each flashcard question should test one specific concept, cause, figure, person, risk, claim, or implication from the document.",
-        "Each flashcard answer should be self-contained and one or two clear explanatory sentences, not a long pasted paragraph.",
-        "Avoid duplicate flashcards. Vary recall between facts, relationships, causes, consequences, comparisons, and implications.",
-        "Quiz questions must be answerable from the document. Multiple-choice questions need one unambiguously correct answer and plausible distractors that the document does not support.",
-        "Every quiz explanation must say why the correct answer follows from the document, not merely repeat the answer.",
-        "For longer academic or research documents, spread material across the whole document and vary difficulty and quiz question types.",
+        ...FLASHCARD_RULES,
+        ...QUIZ_RULES,
+        COVERAGE_RULE,
         `Title: ${input.title}`,
         `Document:\n${clipDocumentText(input.text)}`
       ].join("\n\n");
     return this.generateValidatedJson(prompt, learningJsonSchema, (text) => learningPayloadSchema.parse(JSON.parse(text)));
+  }
+
+  async generateFlashcards(input: { title: string; text: string; count: number }): Promise<LearningPayload["flashcards"]> {
+    const prompt = [
+      "Create flashcards for this ReadMate document.",
+      GROUNDING_RULE,
+      `Create exactly ${input.count} flashcards.`,
+      ...FLASHCARD_RULES,
+      COVERAGE_RULE,
+      `Title: ${input.title}`,
+      `Document:\n${clipDocumentText(input.text)}`
+    ].join("\n\n");
+    return this.generateValidatedJson(prompt, flashcardSetJsonSchema, (text) => flashcardSetSchema.parse(JSON.parse(text)).flashcards);
+  }
+
+  async generateQuiz(input: { title: string; text: string; count: number }): Promise<LearningPayload["quiz"]> {
+    const prompt = [
+      "Create a quiz for this ReadMate document.",
+      GROUNDING_RULE,
+      `Create exactly ${input.count} quiz questions.`,
+      ...QUIZ_RULES,
+      COVERAGE_RULE,
+      `Title: ${input.title}`,
+      `Document:\n${clipDocumentText(input.text)}`
+    ].join("\n\n");
+    return this.generateValidatedJson(prompt, quizSetJsonSchema, (text) => quizSetSchema.parse(JSON.parse(text)).quiz);
   }
 
   async answerQuestion(input: { title: string; text: string; question: string }): Promise<AskAnswer> {
@@ -92,16 +141,33 @@ export class GeminiLearningGenerator implements LearningGenerator {
           responseMimeType: "application/json",
           responseJsonSchema,
           temperature: 0.2,
-          maxOutputTokens: 8192
+          maxOutputTokens: LEARNING_MAX_OUTPUT_TOKENS,
+          ...thinkingConfigForModel(model)
         }
       })
-    }, { fetcher: this.options.fetcher });
+    }, { fetcher: this.options.fetcher, timeoutMs: this.options.timeoutMs ?? learningTimeoutFromEnv() });
     const body = (await response.json()) as GeminiResponse;
     if (!response.ok) throw new Error(body.error?.message ?? "Gemini request failed.");
-    const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
-    if (!text) throw new Error("Gemini did not return structured JSON.");
+    if (body.promptFeedback?.blockReason) throw new Error(`Gemini blocked the study request (${body.promptFeedback.blockReason}).`);
+    const candidate = body.candidates?.[0];
+    const text = candidate?.content?.parts?.filter((part) => !part.thought).map((part) => part.text ?? "").join("").trim();
+    if (candidate?.finishReason === "MAX_TOKENS") throw new Error("Gemini study output was truncated at the token limit.");
+    if (!text) throw new Error(`Gemini did not return structured JSON${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
     return text;
   }
+}
+
+/**
+ * Gemini 2.5 Flash thinks by default, which slows structured extraction and
+ * spends the output budget. Grounded study extraction does not need it.
+ */
+export function thinkingConfigForModel(model: string): { thinkingConfig?: { thinkingBudget: number } } {
+  return /^gemini-2\.5-flash(?!-lite)/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {};
+}
+
+function learningTimeoutFromEnv(): number {
+  const configured = Number(process.env.GEMINI_LEARNING_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LEARNING_TIMEOUT_MS;
 }
 
 function isTimeoutError(error: unknown): boolean {

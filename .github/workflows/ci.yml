@@ -16,8 +16,24 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: readmate_ci
+          # Disposable runner-local database only; never used for production.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d readmate_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      DATABASE_URL: postgresql://localhost/readmate
+      DATABASE_URL: postgresql://readmate_api@127.0.0.1:5432/readmate_ci
+      READMATE_PG_TEST_URL: postgresql://readmate_api@127.0.0.1:5432/readmate_ci
+      READMATE_PG_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/readmate_ci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,6 +45,17 @@ jobs:
       - run: npm ci
       - run: npm run check:publication
       - run: npm run check:dependencies
+      - name: Prepare disposable PostgreSQL regression database
+        run: |
+          psql "$READMATE_PG_ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE readmate_api LOGIN NOSUPERUSER NOBYPASSRLS;
+          CREATE SCHEMA storage;
+          CREATE TABLE storage.buckets (
+            id text PRIMARY KEY, name text, public boolean,
+            file_size_limit bigint, allowed_mime_types text[]
+          );
+          SQL
+          DATABASE_URL="$READMATE_PG_ADMIN_URL" npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

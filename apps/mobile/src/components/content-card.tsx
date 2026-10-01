@@ -92,6 +92,8 @@ export function ProgressBar({ percent }: { percent: number }) {
 
 export function estimateListeningSeconds(document: ReadingDocument): number {
   if (document.estimatedListeningSeconds) return document.estimatedListeningSeconds;
+  // Summary list items omit blocks; assume a typical ~45 s paragraph until the document loads.
+  if (!document.blocks.length && document.blockCount) return Math.max(30, Math.round((document.blockCount * 45) / Math.max(0.5, document.speed)));
   const words = document.blocks.reduce((count, block) => count + block.text.trim().split(/\s+/).filter(Boolean).length, 0);
   return Math.max(30, Math.round((words / 160) * 60 / Math.max(0.5, document.speed)));
 }

@@ -9,9 +9,12 @@ const projectRoot = path.resolve(__dirname, "..");
 const moduleRoot = path.join(projectRoot, "modules", "readmate-airplay");
 const scenePluginPath = path.join(projectRoot, "plugins", "with-ios-scene-lifecycle.js");
 const extensionVersionPluginPath = path.join(projectRoot, "plugins", "with-ios-extension-version-sync.js");
-const appDelegatePath = path.join(projectRoot, "ios", "ReadMateAI", "AppDelegate.swift");
-const infoPlistPath = path.join(projectRoot, "ios", "ReadMateAI", "Info.plist");
-const xcodeProjectPath = path.join(projectRoot, "ios", "ReadMateAI.xcodeproj", "project.pbxproj");
+// Prebuild names the project after the app ("ReadMate" in production), so
+// discover it instead of hardcoding a name that changes with the variant.
+const generatedProjectName = discoverIosProjectName(path.join(projectRoot, "ios")) ?? "ReadMate";
+const appDelegatePath = path.join(projectRoot, "ios", generatedProjectName, "AppDelegate.swift");
+const infoPlistPath = path.join(projectRoot, "ios", generatedProjectName, "Info.plist");
+const xcodeProjectPath = path.join(projectRoot, "ios", `${generatedProjectName}.xcodeproj`, "project.pbxproj");
 const requiredFiles = [
   path.join(moduleRoot, "expo-module.config.json"),
   path.join(moduleRoot, "ios", "ReadMateAirPlay.podspec"),
@@ -49,7 +52,14 @@ const sceneChecks = [
 ];
 
 const iosProjectRoot = path.join(projectRoot, "ios");
-if (fs.existsSync(iosProjectRoot)) {
+// EAS regenerates ios/ from app config (continuous native generation). A
+// folder with no Xcode project or Podfile is not a generated project yet, so
+// only the config-plugin checks apply; a real project must be complete.
+const hasGeneratedProject = fs.existsSync(xcodeProjectPath) || fs.existsSync(path.join(iosProjectRoot, "Podfile"));
+if (fs.existsSync(iosProjectRoot) && !hasGeneratedProject) {
+  console.log(`ios/ has no generated project yet (${fs.readdirSync(iosProjectRoot).join(", ") || "empty"}); EAS prebuild will regenerate it.`);
+}
+if (hasGeneratedProject) {
   const generatedNativeFiles = [appDelegatePath, infoPlistPath, xcodeProjectPath];
   const missingNativeFiles = generatedNativeFiles.filter((file) => !fs.existsSync(file));
   if (missingNativeFiles.length > 0) {
@@ -79,3 +89,12 @@ if (fs.existsSync(xcodeProjectPath)) {
 }
 
 console.log("Validated ReadMateAirPlay, iOS scene lifecycle, and extension build-number sync.");
+
+function discoverIosProjectName(iosRoot) {
+  if (!fs.existsSync(iosRoot)) return undefined;
+  const projects = fs.readdirSync(iosRoot)
+    .filter((entry) => entry.endsWith(".xcodeproj") && entry !== "Pods.xcodeproj")
+    .map((entry) => entry.replace(/\.xcodeproj$/, ""));
+  // Prefer a project whose app sources exist; a stale checkout can hold an older name too.
+  return projects.find((name) => fs.existsSync(path.join(iosRoot, name, "AppDelegate.swift"))) ?? projects[0];
+}

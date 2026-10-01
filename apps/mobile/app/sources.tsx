@@ -1,8 +1,9 @@
 import { useAuth } from "@clerk/expo";
+import { canOfferPremiumUpgrade } from "@/purchases/purchases-availability";
 import { useQuery } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
-import { Link, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ActionButton, EditorialHero, MetricLine, NavBackButton, QuietRule, Screen, SectionCard, SectionHeading, SettingsShortcut, colors, radius } from "@/components/mobile-design";
 import { SourceForm } from "@/components/source-form";
@@ -10,6 +11,7 @@ import { defaultSettings, useReadingLibrary } from "@/hooks/use-reading-library"
 import { sourceFromQuery, suggestSources, topicCategories, type SourceSuggestion } from "@/utils/source-suggestions";
 import { documentTitleFromFilename, normalizeUploadFilename } from "@/utils/upload-filename";
 import { getEntitlements } from "@/api/documents";
+import { extractSharedUrl } from "@/share/shared-url";
 
 // This is a root-stack route so it can be opened from Home without exposing a tab.
 export default function SourcesScreen() {
@@ -24,6 +26,17 @@ export default function SourcesScreen() {
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ sourceName: "", websiteUrl: "", rssFeedUrl: "" });
   const suggestions = useMemo(() => suggestSources(query), [query]);
+  const { sharedUrl } = useLocalSearchParams<{ sharedUrl?: string }>();
+
+  // A link shared from another app arrives pre-filled; the user still taps Add to save it.
+  useEffect(() => {
+    const url = typeof sharedUrl === "string" ? extractSharedUrl({ webUrl: sharedUrl }) : null;
+    if (!url) return;
+    setQuery(url);
+    setSelectedSuggestion(sourceFromQuery(url));
+    setFormError(null);
+    setFormNotice("Shared link ready. Review it, then tap Add to save it to your library.");
+  }, [sharedUrl]);
   const entitlementQuery = useQuery({
     queryKey: ["entitlements"],
     queryFn: async () => getEntitlements(await getToken()),
@@ -44,7 +57,8 @@ export default function SourcesScreen() {
       const result = await saveUrl.mutateAsync({
         url: sourceUrl,
         sourceType: input.sourceType,
-        title: input.sourceType === "rss" ? `${input.suggestion.name} RSS feed` : input.suggestion.name,
+        // A saved page keeps its own headline; the site name only labels feeds.
+        title: input.sourceType === "rss" ? `${input.suggestion.name} RSS feed` : undefined,
         provider: currentSettings.provider,
         voice: currentSettings.voice,
         speed: currentSettings.speed
@@ -88,11 +102,16 @@ export default function SourcesScreen() {
           setFormError(`${message} Choose a smaller file and try again.`);
           Alert.alert("File too large", message);
         } else {
-          setFormError(`${message} Upgrade to ReadMate Premium for larger documents.`);
-          Alert.alert("Premium document", message, [
-            { text: "Not now", style: "cancel" },
-            { text: "View Premium", onPress: openPremium }
-          ]);
+          if (canOfferPremiumUpgrade(false)) {
+            setFormError(`${message} Upgrade to ReadMate Premium for larger documents.`);
+            Alert.alert("Premium document", message, [
+              { text: "Not now", style: "cancel" },
+              { text: "View Premium", onPress: openPremium }
+            ]);
+          } else {
+            setFormError(`${message} Choose a smaller file and try again.`);
+            Alert.alert("File too large", message);
+          }
         }
         return;
       }
@@ -110,7 +129,7 @@ export default function SourcesScreen() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not upload this document.";
       setFormError(message);
-      if (!entitlement?.isPremium && /premium|free plan limit|large document/i.test(message)) {
+      if (canOfferPremiumUpgrade(Boolean(entitlement?.isPremium)) && /premium|free plan limit|large document/i.test(message)) {
         Alert.alert("Premium document", message, [
           { text: "Not now", style: "cancel" },
           { text: "View Premium", onPress: openPremium }
@@ -120,7 +139,7 @@ export default function SourcesScreen() {
   }
 
   return (
-    <Screen bottomNavigation="/(tabs)/more">
+    <Screen narrow bottomNavigation="/(tabs)/more">
       <EditorialHero
         eyebrow="Add anything to your library"
         title="Add content"
@@ -149,7 +168,7 @@ export default function SourcesScreen() {
         notice={formNotice}
         noticeActionLabel={uploadedDocumentId ? "Open" : undefined}
         uploadLimitLabel={`${entitlement?.isPremium ? "Premium uploads" : "Free uploads"} up to ${formatBytes(uploadLimitBytes)}`}
-        showPremiumUpgrade={Boolean(entitlement && !entitlement.isPremium)}
+        showPremiumUpgrade={Boolean(entitlement) && canOfferPremiumUpgrade(Boolean(entitlement?.isPremium))}
         setQuery={(value) => {
           setFormError(null);
           setFormNotice(null);

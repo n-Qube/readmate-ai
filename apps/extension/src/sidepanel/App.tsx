@@ -1,14 +1,14 @@
 import { BookOpen, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FastForward, FileText, FolderOpen, GraduationCap, Headphones, HelpCircle, History as HistoryIcon, Layers, Library, List, Lock, LogOut, Menu, MessageCircle, Mic2, Minus, MoreVertical, Pause, Play, RefreshCw, Rewind, Rss, Search, Send, Settings, SkipBack, SkipForward, Sparkles, Square, Trash2, Upload, Volume2, WifiOff, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteDocumentHistory, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, generateDocumentLearning, getCartesiaVoices, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, getRemoteSettings, listLibrary, markRemoteFlashcardReview, requestTtsAudio, saveRemoteSettings, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError, type ReadMateEntitlement } from "../api/client";
+import { askDocumentQuestion, AUTH_REQUIRED_ERROR, clearRemoteDocumentHistory, clearRemoteHistory, createSyncedDocument, deleteRemoteDocument, deleteRemoteLearningData, generateDocumentLearning, studyFallbackNotice, getDocumentLearningReview, getRemoteDocument, getRemoteEntitlement, getRemoteSettings, listLibrary, markRemoteFlashcardReview, requestTtsAudio, saveRemoteSettings, submitRemoteQuizAttempt, TTS_AUTH_REQUIRED_ERROR, updateSyncedProgress, uploadPdfDocument, UploadRequestError, type ReadMateEntitlement } from "../api/client";
 import { getAuthSession, signOut as clearManualSession, type AuthSession } from "../auth/authClient";
 import { fileFromPdfResponse } from "../pdf/pdfDownload";
 import { extractPdfChunks } from "../pdf/pdfText";
 import { createInitialPlayerState, playerReducer } from "../player/playerMachine";
 import { ReadMateLogo } from "../shared/ReadMateLogo";
 import { normalizeUploadedDocumentForDisplay, normalizeUploadedDocumentsForDisplay } from "../shared/documentDisplay";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings, SPEEDS, TARGET_LANGUAGES, VOICE_LABELS, voicesForProvider } from "../shared/settings";
+import { DEFAULT_SETTINGS, DEFAULT_VOICE_BY_PROVIDER, isPremiumProvider, loadSettings, PROVIDER_LABELS, saveSettings, SPEEDS, TARGET_LANGUAGES, TTS_PROVIDERS, VOICE_LABELS, voicesForProvider } from "../shared/settings";
 import { canInjectIntoUrl, PENDING_READ_REQUEST_KEY, parsePendingReadRequest, resolveActiveReadableTab, resolveActiveTab, sendToActiveTab, sendToTab, type PendingReadRequest, type ReadmateMessage, type TabMessageResult } from "../shared/messages";
 import type { ExtensionSettings, LearningReview, ReadingChunk, ReadingDocument } from "../shared/types";
 import { splitBrowserSpeechSegments, type BrowserSpeechSegment } from "./browserSpeech";
@@ -78,7 +78,6 @@ const TAB_CONFIG: { id: ExtensionTab; label: string; Icon: ComponentType<{ size?
 
 export function App({ clerk }: { clerk?: ClerkBridge }) {
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
-  const [cartesiaVoices, setCartesiaVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const [chunks, setChunks] = useState<ReadingChunk[]>([]);
   const [history, setHistory] = useState<ReadingDocument[]>([]);
@@ -107,6 +106,8 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
   const [quizSelected, setQuizSelected] = useState<number | null>(null);
   const [speechSource, setSpeechSource] = useState<SpeechSource>("cloud");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewingVoice, setPreviewingVoice] = useState(false);
   const audioObjectUrlRef = useRef<string | null>(null);
   const fallbackUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const playbackRunRef = useRef(0);
@@ -133,24 +134,6 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
-
-  useEffect(() => {
-    if (!settings || settings.ttsProvider !== "cartesia" || !auth?.token) {
-      setCartesiaVoices([]);
-      return;
-    }
-    let disposed = false;
-    getCartesiaVoices(settings.apiBaseUrl, auth.token)
-      .then((voices) => {
-        if (!disposed) setCartesiaVoices(voices.map(({ id, name }) => ({ id, name })));
-      })
-      .catch(() => {
-        if (!disposed) setCartesiaVoices([]);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [settings?.apiBaseUrl, settings?.ttsProvider, auth?.token]);
 
   useEffect(() => {
     if (!settings?.apiBaseUrl || !auth?.token) {
@@ -666,6 +649,28 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
     return authRef.current?.token ?? null;
   }
 
+  async function previewSelectedVoice() {
+    const activeSettings = settingsRef.current;
+    if (!activeSettings || previewingVoice) return;
+    setPreviewingVoice(true);
+    try {
+      previewAudioRef.current?.pause();
+      const blob = await requestCurrentTtsAudio(activeSettings, "Hi, this is how ReadMate will sound when it reads to you.");
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.playbackRate = activeSettings.speed;
+      audio.onended = () => URL.revokeObjectURL(url);
+      previewAudioRef.current = audio;
+      await audio.play();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message !== AUTH_REQUIRED_ERROR
+        ? caught.message
+        : "Sign in to preview voices.");
+    } finally {
+      setPreviewingVoice(false);
+    }
+  }
+
   async function requestCurrentTtsAudio(activeSettings: ExtensionSettings, text: string): Promise<Blob> {
     try {
       return await requestTtsAudio(activeSettings, await getCurrentSyncToken(), text);
@@ -800,9 +805,9 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
         flashcards: review ? flashcardsFromReview(review) : (updated.flashcards ?? current.flashcards),
         quizQuestions: review ? quizQuestionsFromReview(review) : (updated.quizQuestions ?? current.quizQuestions)
       }));
-      setNotice(generated.syncPending
+      setNotice(studyFallbackNotice(generated) ?? (generated.syncPending
         ? "Study material is ready. Review progress is still syncing."
-        : "Study material is ready. Open ReadMate mobile Study for flashcards, quiz, notes, and review.");
+        : "Study material is ready. Open ReadMate mobile Study for flashcards, quiz, notes, and review."));
     } catch (caught) {
       setLearningError({
         message: caught instanceof Error ? caught.message : "Could not generate Study material.",
@@ -893,9 +898,9 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
         citedSections: studyPanel.citedSections,
         lastQuestion: studyPanel.lastQuestion
       });
-      setNotice(generated.syncPending
+      setNotice(studyFallbackNotice(generated) ?? (generated.syncPending
         ? `${learnNoticeForMode(mode)} Review progress is still syncing.`
-        : learnNoticeForMode(mode));
+        : learnNoticeForMode(mode)));
     } catch (caught) {
       setLearningError({
         message: caught instanceof Error ? caught.message : "Could not generate learning material.",
@@ -2697,7 +2702,7 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
                     voice: targetLanguage === "tw"
                       ? "ghananlp-asante-twi"
                       : settings.voice.startsWith("ghananlp-")
-                        ? settings.ttsProvider === "cartesia" ? "cartesia-default" : "en-US-Neural2-F"
+                        ? DEFAULT_VOICE_BY_PROVIDER[settings.ttsProvider]
                         : settings.voice
                   });
                 }}
@@ -2711,18 +2716,25 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
               <>
                 <div className="settings-field-label">Voice provider</div>
                 <div className="settings-picker-wrap" style={{ marginBottom: 10 }}>
-                  <div className="settings-picker-value">{settings.ttsProvider === "cartesia" ? "Cartesia" : "Google TTS"}</div>
+                  <div className="settings-picker-value">{PROVIDER_LABELS[settings.ttsProvider]}</div>
                   <ChevronDown size={12} style={{ color: "var(--rm-muted)", flexShrink: 0 }} />
                   <select
                     className="settings-overlay-select"
                     value={settings.ttsProvider}
                     onChange={(event) => {
                       const provider = event.target.value as ExtensionSettings["ttsProvider"];
-                      updateSettings({ ...settings, ttsProvider: provider, voice: provider === "cartesia" ? "cartesia-default" : "en-US-Neural2-F" });
+                      updateSettings({ ...settings, ttsProvider: provider, voice: DEFAULT_VOICE_BY_PROVIDER[provider] });
                     }}
                   >
-                    <option value="google">Google TTS</option>
-                    <option value="cartesia">Cartesia</option>
+                    {TTS_PROVIDERS.map((provider) => (
+                      <option
+                        key={provider}
+                        value={provider}
+                        disabled={isPremiumProvider(provider) && !entitlement?.isPremium && settings.ttsProvider !== provider}
+                      >
+                        {PROVIDER_LABELS[provider]}{isPremiumProvider(provider) && !entitlement?.isPremium ? " (upgrade on mobile)" : ""}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </>
@@ -2748,18 +2760,16 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
                 <div className="settings-field-label">Voice</div>
                 <div className="settings-picker-wrap">
                   <div className="settings-voice-swatch" />
-                  <div className="settings-picker-value">{VOICE_LABELS[settings.voice] ?? cartesiaVoices.find((voice) => voice.id === settings.voice)?.name ?? settings.voice}</div>
-                  <button className="settings-voice-play" aria-label="Preview voice"><Play size={10} /></button>
+                  <div className="settings-picker-value">{VOICE_LABELS[settings.voice] ?? settings.voice}</div>
+                  <button type="button" className="settings-voice-play" aria-label="Preview voice" disabled={previewingVoice} onClick={() => void previewSelectedVoice()}><Play size={10} /></button>
                   <ChevronDown size={12} style={{ color: "var(--rm-muted)", flexShrink: 0 }} />
                   <select
                     className="settings-overlay-select"
                     value={settings.voice}
                     onChange={(event) => updateSettings({ ...settings, voice: event.target.value })}
                   >
-                    {(settings.ttsProvider === "cartesia"
-                      ? (cartesiaVoices.length ? cartesiaVoices.map((voice) => voice.id) : [...new Set(["cartesia-default", settings.voice])])
-                      : voicesForProvider(settings.ttsProvider)).map((voice) => (
-                      <option key={voice} value={voice}>{VOICE_LABELS[voice] ?? cartesiaVoices.find((item) => item.id === voice)?.name ?? voice}</option>
+                    {voicesForProvider(settings.ttsProvider).map((voice) => (
+                      <option key={voice} value={voice}>{VOICE_LABELS[voice] ?? voice}</option>
                     ))}
                   </select>
                 </div>
@@ -2829,6 +2839,7 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
               <div className="settings-card-title">Privacy</div>
             </div>
             <p className="settings-privacy-text">ReadMate only reads pages when you explicitly ask. We don't track your browsing.</p>
+            <p className="settings-privacy-text">When you press Play, the text being read is sent to ReadMate and to {languageProviderLabel(settings.targetLanguage, settings.ttsProvider)} to generate AI audio.</p>
             <div className="settings-data-actions">
               <button className="settings-manage-btn" onClick={() => setActiveTab("library")}>
                 <Library size={12} /> Review saved data

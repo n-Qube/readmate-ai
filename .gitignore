@@ -49,7 +49,8 @@ credentials/
 *.tgz
 /android/
 /app.json
-* 2.*
+# iCloud and Finder sync-conflict copies ("name 2.ext", "name 3.ext", ...)
+* [2-9].*
 /builds/
 /screenshots/
 /store-assets/

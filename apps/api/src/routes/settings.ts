@@ -5,7 +5,7 @@ import { asyncHandler } from "../asyncHandler.js";
 import { getUserId, type AuthedRequest } from "../auth.js";
 import type { prisma as PrismaSingleton } from "../prisma.js";
 import { isLocalLanguage, normalizeLocalLanguageVoice, normalizeTargetLanguage, SUPPORTED_TARGET_LANGUAGES } from "../localLanguage.js";
-import { normalizeTtsProvider, normalizeTtsVoice } from "../ttsSchema.js";
+import { isPremiumTtsProvider, normalizeTtsProvider, normalizeTtsVoice } from "../ttsSchema.js";
 import { entitlementForRequest, requirePremiumAudio, type MaybePromise, type ReadMateEntitlement } from "../entitlements.js";
 
 const contentTypes = ["webpage", "selection", "pdf", "url", "rss", "news", "document"] as const;
@@ -58,7 +58,7 @@ export function settingsRouter(deps: SettingsRouterDeps = {}): Router {
     const userId = getUserId(req);
     const settings = await repository.getOrCreateSettings(userId);
     const entitlement = await getEntitlement(req, userId);
-    res.json(!entitlement.isPremium && settings.targetLanguage === "en" && settings.provider === "cartesia"
+    res.json(!entitlement.isPremium && settings.targetLanguage === "en" && isPremiumTtsProvider(settings.provider)
       ? { ...settings, provider: "google", voice: normalizeTtsVoice("google", undefined) }
       : settings);
   }));
@@ -67,7 +67,7 @@ export function settingsRouter(deps: SettingsRouterDeps = {}): Router {
     try {
       const userId = getUserId(req);
       const payload = settingsSchema.parse(req.body);
-      if (payload.targetLanguage === "en" && payload.provider === "cartesia") requirePremiumAudio(await getEntitlement(req, userId));
+      if (payload.targetLanguage === "en" && isPremiumTtsProvider(payload.provider)) requirePremiumAudio(await getEntitlement(req, userId));
       res.json(await repository.updateSettings(userId, payload));
     } catch (error) {
       if (error instanceof z.ZodError) {

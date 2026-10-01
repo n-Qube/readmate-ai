@@ -21,6 +21,8 @@ import type { CreateDocumentInput, SaveUrlInput, UpdateDocumentInput } from "@/a
 import type { ReadingDocument, SourceSubscription, UserSettings } from "@/types";
 import { balanceFeedDocuments, dedupeDocuments, prependDocument } from "@/utils/document-list";
 import { screenshotMode } from "@/utils/screenshot-mode";
+import { withKnownBlocks } from "../utils/document-blocks";
+import { settingsMutationOptions } from "./settings-mutation";
 
 export function useReadingLibrary() {
   const { isSignedIn, getToken } = useAuth();
@@ -45,26 +47,7 @@ export function useReadingLibrary() {
     enabled: canLoad
   });
 
-  const saveSettings = useMutation({
-    mutationFn: async (next: Omit<UserSettings, "userId" | "updatedAt">) => updateUserSettings(await getToken(), next),
-    onMutate: async (next) => {
-      await queryClient.cancelQueries({ queryKey: ["settings"] });
-      const previous = queryClient.getQueryData<UserSettings>(["settings"]);
-      queryClient.setQueryData<UserSettings>(["settings"], (current) => ({
-        userId: current?.userId ?? "pending",
-        updatedAt: current?.updatedAt ?? new Date().toISOString(),
-        ...next
-      }));
-      return { previous };
-    },
-    onError: (_error, _next, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["settings"], context.previous);
-      }
-    },
-    onSuccess: (next) => queryClient.setQueryData(["settings"], next),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["settings"] })
-  });
+  const saveSettings = useMutation(settingsMutationOptions(queryClient, async (next) => updateUserSettings(await getToken(), next)));
 
   const addDocument = useMutation({
     mutationFn: async (input: CreateDocumentInput) => createDocument(await getToken(), input),
@@ -169,8 +152,10 @@ export function useReadingLibrary() {
   });
 
   async function markProgress(document: ReadingDocument, progress: ReadingDocument["progress"]) {
-    const updated = await updateDocumentProgress(document.id, await getToken(), progress);
-    queryClient.setQueryData(["document", document.id], updated);
+    const response = await updateDocumentProgress(document.id, await getToken(), progress);
+    const updated = withKnownBlocks(response, queryClient.getQueryData<ReadingDocument>(["document", document.id]) ?? document);
+    // The per-document cache must always hold the full text.
+    if (updated.blocks.length) queryClient.setQueryData(["document", document.id], updated);
     queryClient.setQueryData<ReadingDocument[]>(["documents"], (current) =>
       current?.map((item) => (item.id === updated.id ? updated : item))
     );

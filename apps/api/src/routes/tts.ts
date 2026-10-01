@@ -6,7 +6,9 @@ import { fetchWithTimeout } from "../fetchWithTimeout.js";
 import { getGoogleAccessToken, resetGoogleTokenCacheForTests } from "../googleAuth.js";
 import { isLocalLanguage, SpeechDependencyError, synthesizeLocalLanguageSpeech } from "../localLanguage.js";
 import { nanoTwiConfigured, synthesizeNanoTwiSpeech } from "../nanoTwi.js";
-import { DEFAULT_VOICE_BY_PROVIDER, parseTtsRequest } from "../ttsSchema.js";
+import { DEFAULT_VOICE_BY_PROVIDER, GEMINI_TTS_VOICE_OPTIONS, isGeminiTtsProvider, isPremiumTtsProvider, parseTtsRequest, type TtsProvider } from "../ttsSchema.js";
+import { synthesizeGeminiSpeech } from "../geminiTts.js";
+import { splitTextForSpeech } from "../speechChunks.js";
 import { getUserId, type AuthedRequest } from "../auth.js";
 import {
   consumeDailyUsage,
@@ -19,9 +21,6 @@ import { databaseUnavailableCode, isDatabaseUnavailableError } from "../database
 import { entitlementForRequest, PremiumRequiredError, requirePremiumAudio, type MaybePromise, type ReadMateEntitlement } from "../entitlements.js";
 
 const GOOGLE_TTS_TEXT_BYTE_LIMIT = 4_500;
-type CartesiaVoiceOption = { id: string; name: string; description?: string; language?: string; gender?: string };
-
-let cartesiaVoiceCache: { expiresAt: number; voices: CartesiaVoiceOption[] } | null = null;
 
 type TtsRouterDeps = {
   consumeUsage?: typeof consumeDailyUsage;
@@ -35,17 +34,9 @@ export function ttsRouter(deps: TtsRouterDeps = {}): Router {
   const createCastUrl = deps.createCastUrl ?? createSecureCastUrl;
   const getEntitlement = deps.getEntitlement ?? entitlementForRequest;
 
-  router.get("/voices", async (req: AuthedRequest, res: Response) => {
-    try {
-      requirePremiumAudio(await getEntitlement(req, getUserId(req)));
-      res.json({ voices: await listCartesiaVoices() });
-    } catch (error) {
-      if (error instanceof PremiumRequiredError) {
-        res.status(error.statusCode).json({ error: error.message, code: error.code, feature: error.feature });
-        return;
-      }
-      res.status(502).json({ error: "Cartesia voices are temporarily unavailable." });
-    }
+  // Static catalogue; older app builds also read it for their natural-voice picker.
+  router.get("/voices", (_req: AuthedRequest, res: Response) => {
+    res.json({ voices: GEMINI_TTS_VOICE_OPTIONS });
   });
 
   router.post("/", async (req: AuthedRequest, res: Response) => {
@@ -53,7 +44,7 @@ export function ttsRouter(deps: TtsRouterDeps = {}): Router {
       const payload = parseTtsRequest(req.body);
       const userId = getUserId(req);
       const entitlement = await getEntitlement(req, userId);
-      if (payload.targetLanguage === "en" && payload.provider === "cartesia") requirePremiumAudio(entitlement);
+      if (payload.targetLanguage === "en" && isPremiumTtsProvider(payload.provider)) requirePremiumAudio(entitlement);
       await consumeUsage(
         userId,
         "tts_input_chars",
@@ -78,7 +69,7 @@ export function ttsRouter(deps: TtsRouterDeps = {}): Router {
       const payload = parseTtsRequest(req.body);
       const userId = getUserId(req);
       const entitlement = await getEntitlement(req, userId);
-      if (payload.targetLanguage === "en" && payload.provider === "cartesia") requirePremiumAudio(entitlement);
+      if (payload.targetLanguage === "en" && isPremiumTtsProvider(payload.provider)) requirePremiumAudio(entitlement);
       await consumeUsage(
         userId,
         "tts_input_chars",
@@ -101,64 +92,7 @@ export function ttsRouter(deps: TtsRouterDeps = {}): Router {
   return router;
 }
 
-async function listCartesiaVoices(): Promise<CartesiaVoiceOption[]> {
-  if (cartesiaVoiceCache && cartesiaVoiceCache.expiresAt > Date.now()) return cartesiaVoiceCache.voices;
-  const defaultVoice: CartesiaVoiceOption = {
-    id: DEFAULT_VOICE_BY_PROVIDER.cartesia,
-    name: "Natural default",
-    description: "Your configured Cartesia voice."
-  };
-  const configured = parseConfiguredCartesiaVoices();
-  const apiKey = process.env.CARTESIA_API_KEY?.trim();
-  if (!apiKey) {
-    const voices = configured.length ? [defaultVoice, ...configured] : [defaultVoice];
-    cartesiaVoiceCache = { expiresAt: Date.now() + 5 * 60_000, voices };
-    return voices;
-  }
-  const response = await fetchWithTimeout("https://api.cartesia.ai/voices?limit=100&language=en", {
-    headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-03-01" }
-  });
-  const body = (await response.json().catch(() => ({}))) as Array<Record<string, unknown>> | { data?: Array<Record<string, unknown>>; error?: { message?: string } };
-  const remoteVoices = Array.isArray(body) ? body : body.data ?? [];
-  if (!response.ok) throw new Error((!Array.isArray(body) ? body.error?.message : undefined) ?? `Cartesia voices failed (${response.status}).`);
-  const voices = [
-    defaultVoice,
-    ...configured,
-    ...remoteVoices
-      .map((voice) => ({
-        id: typeof voice.id === "string" ? voice.id : "",
-        name: typeof voice.name === "string" ? voice.name : "Natural voice",
-        description: typeof voice.description === "string" ? voice.description : undefined,
-        language: typeof voice.language === "string" ? voice.language : undefined,
-        gender: typeof voice.gender === "string" ? voice.gender : undefined
-      }))
-      .filter((voice) => voice.id && voice.id !== defaultVoice.id)
-  ];
-  const unique = [...new Map(voices.map((voice) => [voice.id, voice])).values()];
-  cartesiaVoiceCache = { expiresAt: Date.now() + 5 * 60_000, voices: unique };
-  return unique;
-}
-
-function parseConfiguredCartesiaVoices(): CartesiaVoiceOption[] {
-  const raw = process.env.CARTESIA_VOICE_OPTIONS?.trim();
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const voices: CartesiaVoiceOption[] = [];
-    for (const voice of parsed) {
-      if (!voice || typeof voice !== "object") continue;
-      const item = voice as Record<string, unknown>;
-      if (typeof item.id !== "string" || typeof item.name !== "string") continue;
-      voices.push({ id: item.id, name: item.name, description: typeof item.description === "string" ? item.description : undefined });
-    }
-    return voices;
-  } catch {
-    return [];
-  }
-}
-
-async function synthesizeSpeech(payload: ReturnType<typeof parseTtsRequest>): Promise<{ buffer: Buffer; contentType: string; provider: "google" | "cartesia" | "ghananlp" | "nano-twi" }> {
+async function synthesizeSpeech(payload: ReturnType<typeof parseTtsRequest>): Promise<{ buffer: Buffer; contentType: string; provider: TtsProvider | "ghananlp" | "nano-twi" }> {
   if (isLocalLanguage(payload.targetLanguage)) {
     const speech = await synthesizeLocalLanguageSpeech({
       text: payload.text,
@@ -170,50 +104,42 @@ async function synthesizeSpeech(payload: ReturnType<typeof parseTtsRequest>): Pr
     });
     return speech;
   }
-  if (payload.provider === "cartesia") {
-    return {
-      buffer: await synthesizeWithCartesia(payload),
-      contentType: "audio/mpeg",
-      provider: "cartesia"
-    };
+  if (isGeminiTtsProvider(payload.provider)) {
+    try {
+      return {
+        buffer: await synthesizeGeminiSpeech({
+          provider: payload.provider,
+          text: payload.text,
+          voice: payload.voice,
+          speed: payload.speed,
+          instructions: payload.instructions
+        }),
+        contentType: "audio/wav",
+        provider: payload.provider
+      };
+    } catch (error) {
+      if (!(error instanceof SpeechDependencyError) || error.dependency !== "gemini_tts") throw error;
+      // Keep playback working when Gemini is rate limited, over quota, or down:
+      // answer with the standard Google voice and say so in the provider header.
+      console.warn(JSON.stringify({
+        event: "tts_provider_fallback",
+        from: payload.provider,
+        to: "google",
+        upstreamStatus: error.upstreamStatus,
+        timedOut: error.timedOut
+      }));
+      return {
+        buffer: await synthesizeWithGoogle({ ...payload, provider: "google", voice: DEFAULT_VOICE_BY_PROVIDER.google }),
+        contentType: "audio/mpeg",
+        provider: "google"
+      };
+    }
   }
   return {
     buffer: await synthesizeWithGoogle(payload),
     contentType: "audio/mpeg",
     provider: "google"
   };
-}
-
-async function synthesizeWithCartesia(payload: ReturnType<typeof parseTtsRequest>): Promise<Buffer> {
-  const apiKey = process.env.CARTESIA_API_KEY?.trim();
-  if (!apiKey) throw new Error("Cartesia API key is not configured.");
-  const voiceId = payload.voice === DEFAULT_VOICE_BY_PROVIDER.cartesia
-    ? process.env.CARTESIA_VOICE_ID?.trim()
-    : payload.voice;
-  if (!voiceId) throw new Error("Cartesia default voice is not configured.");
-
-  const response = await fetchWithTimeout("https://api.cartesia.ai/tts/bytes", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Cartesia-Version": "2026-03-01",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model_id: process.env.CARTESIA_MODEL_ID?.trim() || "sonic-3",
-      transcript: payload.text,
-      voice: { id: voiceId },
-      language: "en",
-      output_format: {
-        container: "mp3",
-        sample_rate: 44_100,
-        bit_rate: 128_000
-      },
-      generation_config: { speed: payload.speed }
-    })
-  });
-  if (!response.ok) throw new Error(`Cartesia TTS failed (${response.status}): ${await response.text()}`);
-  return Buffer.from(await response.arrayBuffer());
 }
 
 async function synthesizeWithGoogle(payload: ReturnType<typeof parseTtsRequest>): Promise<Buffer> {
@@ -258,81 +184,7 @@ async function synthesizeGoogleTextPart(payload: ReturnType<typeof parseTtsReque
 }
 
 function splitTextForGoogleTts(text: string): string[] {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-  if (fitsGoogleTextLimit(normalized)) return [normalized];
-
-  const parts: string[] = [];
-  let current = "";
-  for (const sentence of normalized.split(/(?<=[.!?])\s+/)) {
-    if (!sentence) continue;
-    const candidate = current ? `${current} ${sentence}` : sentence;
-    if (fitsGoogleTextLimit(candidate)) {
-      current = candidate;
-      continue;
-    }
-    if (current) {
-      parts.push(current);
-      current = "";
-    }
-    if (fitsGoogleTextLimit(sentence)) {
-      current = sentence;
-      continue;
-    }
-    parts.push(...splitOversizedText(sentence));
-  }
-  if (current) parts.push(current);
-  return parts;
-}
-
-function splitOversizedText(text: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  for (const word of text.split(/\s+/)) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (fitsGoogleTextLimit(candidate)) {
-      current = candidate;
-      continue;
-    }
-    if (current) parts.push(current);
-    if (fitsGoogleTextLimit(word)) {
-      current = word;
-    } else {
-      parts.push(...splitOversizedToken(word));
-      current = "";
-    }
-  }
-  if (current) parts.push(current);
-  return parts;
-}
-
-function splitOversizedToken(text: string): string[] {
-  const parts: string[] = [];
-  let offset = 0;
-  while (offset < text.length) {
-    let low = offset + 1;
-    let high = text.length;
-    let end = low;
-    while (low <= high) {
-      let midpoint = Math.floor((low + high) / 2);
-      const previous = text.charCodeAt(midpoint - 1);
-      const next = text.charCodeAt(midpoint);
-      if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) midpoint += 1;
-      if (fitsGoogleTextLimit(text.slice(offset, midpoint))) {
-        end = midpoint;
-        low = midpoint + 1;
-      } else {
-        high = midpoint - 1;
-      }
-    }
-    parts.push(text.slice(offset, end));
-    offset = end;
-  }
-  return parts;
-}
-
-function fitsGoogleTextLimit(text: string): boolean {
-  return Buffer.byteLength(text, "utf8") <= GOOGLE_TTS_TEXT_BYTE_LIMIT;
+  return splitTextForSpeech(text, GOOGLE_TTS_TEXT_BYTE_LIMIT);
 }
 
 function languageCodeFromGoogleVoice(voice: string): string {
@@ -418,7 +270,6 @@ async function createSecureCastUrl(
 export const __ttsInternals = {
   getGoogleAccessToken,
   synthesizeSpeech,
-  synthesizeWithCartesia,
   synthesizeWithGoogle,
   splitTextForGoogleTts,
   resetGoogleTokenCacheForTests

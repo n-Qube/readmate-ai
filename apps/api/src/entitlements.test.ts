@@ -145,7 +145,7 @@ describe("ReadMate entitlements", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("gates Cartesia and large documents for Free accounts", () => {
+  it("gates premium Gemini audio and large documents for Free accounts", () => {
     const free = entitlementForPlan("free");
     expect(() => requirePremiumAudio(free)).toThrow(PremiumRequiredError);
     expect(() => requireDocumentWithinPlan(free, { byteSize: free.limits.maxUploadBytes + 1 })).toThrow(PremiumRequiredError);

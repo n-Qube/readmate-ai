@@ -158,6 +158,7 @@ export default function DocumentScreen() {
       queryClient.invalidateQueries({ queryKey: ["learning-review", id] });
     }
   });
+  const [studyFallbackNotice, setStudyFallbackNotice] = useState<string | null>(null);
   const generateStudySet = useMutation({
     mutationFn: async () =>
       generateDocumentLearning(await getToken(), String(id), {
@@ -165,7 +166,12 @@ export default function DocumentScreen() {
         quizCount: boundedStudyCount(quizCount, 1, 12),
         targetLanguage: settingsQuery.data?.targetLanguage ?? "en"
       }),
-    onSuccess: ({ document: updatedDocument }) => {
+    onSuccess: ({ document: updatedDocument, fallback, preserved }) => {
+      setStudyFallbackNotice(!fallback
+        ? null
+        : preserved
+          ? "ReadMate AI is busy, so your saved study set was kept. Try again in a few minutes."
+          : "ReadMate AI is busy, so these are quick study notes from the text. Try again in a few minutes for AI flashcards and quiz questions.");
       setQuizAnswers({});
       setQuizAttempt(null);
       setFlippedFlashcards({});
@@ -265,6 +271,10 @@ export default function DocumentScreen() {
           tone="error"
           onRetry={() => generateStudySet.mutate()}
         />
+      ) : null}
+
+      {studyFallbackNotice && !generateStudySet.isPending ? (
+        <InlineStatusMessage message={studyFallbackNotice} tone="notice" onRetry={() => generateStudySet.mutate()} />
       ) : null}
 
       <LearningSections document={document} mode={mode} review={activeLearningReview} hasReview={Boolean(activeLearningReview)} />
@@ -994,10 +1004,10 @@ function StudyToolGrid({ activeMode, document, review, onSelect }: { activeMode:
   );
 }
 
-function InlineStatusMessage({ message, tone, onRetry }: { message: string; tone: "loading" | "error"; onRetry?: () => void }) {
+function InlineStatusMessage({ message, tone, onRetry }: { message: string; tone: "loading" | "error" | "notice"; onRetry?: () => void }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, borderCurve: "continuous", backgroundColor: tone === "error" ? colors.redSoft : colors.blueChip }}>
-      <Text selectable style={{ flex: 1, color: tone === "error" ? colors.red : colors.blue, fontSize: 13, lineHeight: 19, fontWeight: "700" }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, borderCurve: "continuous", backgroundColor: tone === "error" ? colors.redSoft : tone === "notice" ? colors.amberSoft : colors.blueChip }}>
+      <Text selectable style={{ flex: 1, color: tone === "error" ? colors.red : tone === "notice" ? colors.amber : colors.blue, fontSize: 13, lineHeight: 19, fontWeight: "700" }}>
         {message}
       </Text>
       {onRetry ? (

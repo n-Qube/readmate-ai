@@ -14,6 +14,7 @@ import { PrismaDocumentRepository } from "./documents.js";
 import {
   consumeDailyUsage,
   DEFAULT_AI_DAILY_INPUT_CHAR_LIMIT,
+  releaseDailyUsage,
   usageLimitFromEnv
 } from "../usageQuota.js";
 import {
@@ -156,8 +157,11 @@ export type GlobalLearningReviewResponse = {
   };
 };
 
+export type StudySyncPayload = Pick<LearningPayload, "topicTags"> & Partial<Pick<LearningPayload, "flashcards" | "quiz">>;
+
 export type LearningRepository = {
-  syncGeneratedLearning(userId: string, documentId: string, learning: LearningPayload): Promise<void>;
+  /** Replaces only the parts present, so regenerating flashcards never rewrites the quiz. */
+  syncGeneratedLearning(userId: string, documentId: string, learning: StudySyncPayload): Promise<void>;
   getReview(userId: string, document: ReadingDocumentResponse): Promise<LearningReviewResponse>;
   listReview(userId: string, documents: ReadingDocumentResponse[]): Promise<GlobalLearningReviewResponse>;
   markFlashcardReview(
@@ -179,6 +183,7 @@ type LearningRouterDeps = {
   learningRepository?: LearningRepository;
   generator?: LearningGenerator;
   consumeUsage?: typeof consumeDailyUsage;
+  releaseUsage?: typeof releaseDailyUsage;
   webMcpActionRepository?: WebMcpActionIdempotencyDeps["repository"];
   webMcpDigestKey?: string;
   studyPackEffectRepository?: StudyPackEffectRepository;
@@ -191,6 +196,7 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
   const learningRepository = deps.learningRepository ?? new PrismaLearningRepository();
   const generator = deps.generator ?? new GeminiLearningGenerator();
   const consumeUsage = deps.consumeUsage ?? consumeDailyUsage;
+  const releaseUsage = deps.releaseUsage ?? releaseDailyUsage;
   const accountDeletionGuard = deps.accountDeletionGuard ?? assertAccountDeletionNotFenced;
 
   router.get("/review", async (req: AuthedRequest, res: Response, next) => {
@@ -283,10 +289,13 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       }
 
       if (action.kind === "execute") await accountDeletionGuard(userId);
-      await chargeAiUsage(consumeUsage, userId, document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
+      const charged = await chargeAiUsage(consumeUsage, userId, document);
+      const generated = await generateLearningForDocument(generator, document, options);
+      if (generated.aiFailed) await refundAiUsage(releaseUsage, userId, charged);
+      const saved = savedLearningToPreserve(document, generated.fallback);
+      const learning = saved ?? generated.learning;
       if (action.kind === "execute") await accountDeletionGuard(userId);
-      const updated = await documentRepository.updateDocument(userId, document.id, {
+      const updated = saved ? document : await documentRepository.updateDocument(userId, document.id, {
         summary: learning.summary.detailed,
         keyPoints: learning.keyPoints,
         topicTags: learning.topicTags,
@@ -294,10 +303,10 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
         quizQuestions: learning.quiz.map((quiz) => ({ question: quiz.question, answer: `${quiz.correctAnswer}\n\n${quiz.explanation}` }))
       });
       if (action.kind === "execute") await accountDeletionGuard(userId);
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, userId, document.id, learning));
+      const syncPending = saved ? false : !(await syncGeneratedLearningResiliently(learningRepository, userId, document.id, learning));
       await completeStudyPackEffect(studyPackEffect);
       await completeWebMcpAction(webMcpAction, { resourceType: "study_pack", resourceId: document.id });
-      res.json({ learning, document: updated, fallback, syncPending, requested: options });
+      res.json({ learning, document: updated, fallback: generated.fallback, preserved: Boolean(saved), syncPending, requested: options });
     } catch (error) {
       await failStudyPackEffect(studyPackEffect, error);
       await failWebMcpAction(webMcpAction, error);
@@ -314,12 +323,15 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       const options = parseLearningGenerationOptions(req.body);
       const document = await loadDocument(documentRepository, getUserId(req), String(req.params.documentId), res);
       if (!document) return;
-      await chargeAiUsage(consumeUsage, getUserId(req), document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
-      const flashcards = learning.flashcards.map((card) => ({ front: card.question, back: card.answer }));
-      const updated = await documentRepository.updateDocument(getUserId(req), document.id, { flashcards });
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
-      res.json({ flashcards: learning.flashcards, document: updated, fallback, syncPending, requested: options });
+      const charged = await chargeAiUsage(consumeUsage, getUserId(req), document);
+      const part = await generateStudyPartForDocument(generator, document, options, "flashcards");
+      if (part.aiFailed) await refundAiUsage(releaseUsage, getUserId(req), charged);
+      const flashcards = part.items.map((card) => ({ front: card.question, back: card.answer }));
+      const updated = part.preserved ? document : await documentRepository.updateDocument(getUserId(req), document.id, { flashcards });
+      const syncPending = part.preserved
+        ? false
+        : !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, { topicTags: part.topicTags, flashcards: part.items }));
+      res.json({ flashcards: part.items, document: updated, fallback: part.fallback, preserved: part.preserved, syncPending, requested: options });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.issues[0]?.message ?? "Invalid flashcard generation request." });
@@ -334,12 +346,15 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       const options = parseLearningGenerationOptions(req.body);
       const document = await loadDocument(documentRepository, getUserId(req), String(req.params.documentId), res);
       if (!document) return;
-      await chargeAiUsage(consumeUsage, getUserId(req), document);
-      const { learning, fallback } = await generateLearningForDocument(generator, document, options);
-      const quizQuestions = learning.quiz.map((quiz) => ({ question: quiz.question, answer: `${quiz.correctAnswer}\n\n${quiz.explanation}` }));
-      const updated = await documentRepository.updateDocument(getUserId(req), document.id, { quizQuestions });
-      const syncPending = !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, learning));
-      res.json({ quiz: learning.quiz, document: updated, fallback, syncPending, requested: options });
+      const charged = await chargeAiUsage(consumeUsage, getUserId(req), document);
+      const part = await generateStudyPartForDocument(generator, document, options, "quiz");
+      if (part.aiFailed) await refundAiUsage(releaseUsage, getUserId(req), charged);
+      const quizQuestions = part.items.map((quiz) => ({ question: quiz.question, answer: `${quiz.correctAnswer}\n\n${quiz.explanation}` }));
+      const updated = part.preserved ? document : await documentRepository.updateDocument(getUserId(req), document.id, { quizQuestions });
+      const syncPending = part.preserved
+        ? false
+        : !(await syncGeneratedLearningResiliently(learningRepository, getUserId(req), document.id, { topicTags: part.topicTags, quiz: part.items }));
+      res.json({ quiz: part.items, document: updated, fallback: part.fallback, preserved: part.preserved, syncPending, requested: options });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: error.issues[0]?.message ?? "Invalid quiz generation request." });
@@ -453,8 +468,9 @@ export function learningRouter(deps: LearningRouterDeps = {}): Router {
       const payload = askSchema.parse(req.body);
       const document = await loadDocument(documentRepository, getUserId(req), String(req.params.documentId), res);
       if (!document) return;
-      await chargeAiUsage(consumeUsage, getUserId(req), document, payload.question);
+      const charged = await chargeAiUsage(consumeUsage, getUserId(req), document, payload.question);
       const { answer, fallback } = await answerQuestionForDocument(generator, document, payload.question, payload.targetLanguage);
+      if (fallback) await refundAiUsage(releaseUsage, getUserId(req), charged);
       res.json({ ...answer, fallback });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -505,7 +521,7 @@ async function chargeAiUsage(
   userId: string,
   document: ReadingDocumentResponse,
   question?: string
-): Promise<void> {
+): Promise<number> {
   const prompt = documentPromptInput(document, question);
   const quantity = Math.max(1, prompt.title.length + prompt.text.length + (question?.length ?? 0));
   await consumeUsage(
@@ -514,6 +530,16 @@ async function chargeAiUsage(
     quantity,
     usageLimitFromEnv("AI_DAILY_INPUT_CHAR_LIMIT", DEFAULT_AI_DAILY_INPUT_CHAR_LIMIT)
   );
+  return quantity;
+}
+
+/** Best effort: a failed refund must not turn a served fallback into an error. */
+async function refundAiUsage(releaseUsage: typeof releaseDailyUsage, userId: string, quantity: number): Promise<void> {
+  try {
+    await releaseUsage(userId, "ai_input_chars", quantity);
+  } catch (error) {
+    console.warn("ReadMate could not refund AI usage after a fallback.", { name: error instanceof Error ? error.name : "UnknownError" });
+  }
 }
 
 function parseLearningGenerationOptions(body: unknown): LearningGenerationOptions {
@@ -523,6 +549,19 @@ function parseLearningGenerationOptions(body: unknown): LearningGenerationOption
     quizCount: parsed.quizCount ?? DEFAULT_QUIZ_COUNT,
     targetLanguage: parsed.targetLanguage
   };
+}
+
+/**
+ * Extractive fallback is a stopgap for documents with no study material. It
+ * must never replace a complete saved set, which is usually AI-generated.
+ */
+function savedLearningToPreserve(document: ReadingDocumentResponse, fallback: boolean): LearningPayload | null {
+  if (!fallback) return null;
+  try {
+    return learningPayloadForReplay(document);
+  } catch {
+    return null;
+  }
 }
 
 function learningPayloadForReplay(document: ReadingDocumentResponse): LearningPayload {
@@ -548,16 +587,110 @@ function learningPayloadForReplay(document: ReadingDocumentResponse): LearningPa
       question: card.front,
       answer: card.back
     })),
-    quiz: quizQuestions.slice(0, MAX_QUIZ_COUNT).map((question) => {
-      const [correctAnswer = question.answer, explanation = "Review the saved study material."] = question.answer.split(/\n\n/, 2);
-      return {
-        type: "short_answer" as const,
-        question: question.question,
-        correctAnswer,
-        explanation: explanation || "Review the saved study material."
-      };
-    })
+    quiz: quizQuestions.slice(0, MAX_QUIZ_COUNT).map(quizFromSavedQuestion)
   };
+}
+
+function quizFromSavedQuestion(question: { question: string; answer: string }): LearningPayload["quiz"][number] {
+  const [correctAnswer = question.answer, explanation = "Review the saved study material."] = question.answer.split(/\n\n/, 2);
+  return {
+    type: "short_answer",
+    question: question.question,
+    correctAnswer,
+    explanation: explanation || "Review the saved study material."
+  };
+}
+
+type StudyPart = "flashcards" | "quiz";
+type StudyPartItems = { flashcards: LearningPayload["flashcards"]; quiz: LearningPayload["quiz"] };
+type StudyPartResult<P extends StudyPart> = {
+  items: StudyPartItems[P];
+  topicTags: string[];
+  /** The AI service failed, so items are saved or extractive material. */
+  fallback: boolean;
+  /** On failure, the document's saved part was kept and must not be rewritten. */
+  preserved: boolean;
+  /** The AI request itself failed, so its usage charge is refunded. */
+  aiFailed: boolean;
+};
+
+/**
+ * Regenerate only flashcards or only the quiz. Generating a whole pack here
+ * tripled AI cost and silently replaced the other part in the review store.
+ */
+async function generateStudyPartForDocument<P extends StudyPart>(
+  generator: LearningGenerator,
+  document: ReadingDocumentResponse,
+  options: LearningGenerationOptions,
+  part: P
+): Promise<StudyPartResult<P>> {
+  const focused = part === "flashcards" ? generator.generateFlashcards : generator.generateQuiz;
+  if (!focused) {
+    const generated = await generateLearningForDocument(generator, document, options);
+    const saved = savedLearningToPreserve(document, generated.fallback);
+    const learning = saved ?? generated.learning;
+    return { items: learning[part] as StudyPartItems[P], topicTags: learning.topicTags, fallback: generated.fallback, preserved: Boolean(saved), aiFailed: generated.aiFailed };
+  }
+
+  const topicTags = document.topicTags?.length ? document.topicTags : [document.category || "Study"];
+  let items: StudyPartItems[P];
+  try {
+    const input = { ...documentPromptInput(document), count: part === "flashcards" ? options.flashcardCount : options.quizCount };
+    items = (part === "flashcards" ? await generator.generateFlashcards!(input) : await generator.generateQuiz!(input)) as StudyPartItems[P];
+  } catch (error) {
+    console.warn(`ReadMate ${part} generation used fallback.`, {
+      documentId: document.id,
+      recoverable: isRecoverableGeminiError(error),
+      error: error instanceof Error ? error.message : String(error)
+    });
+    const saved = savedStudyPart(document, part);
+    if (saved) return { items: saved, topicTags, fallback: true, preserved: true, aiFailed: true };
+    return { items: fallbackLearningForDocument(document, options)[part] as StudyPartItems[P], topicTags, fallback: true, preserved: false, aiFailed: true };
+  }
+
+  try {
+    return { items: await localizeStudyPart(items, part, options.targetLanguage), topicTags, fallback: false, preserved: false, aiFailed: false };
+  } catch (error) {
+    console.warn("ReadMate returned English study material because local-language translation was unavailable.", {
+      documentId: document.id,
+      targetLanguage: options.targetLanguage,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { items, topicTags, fallback: true, preserved: false, aiFailed: false };
+  }
+}
+
+function savedStudyPart<P extends StudyPart>(document: ReadingDocumentResponse, part: P): StudyPartItems[P] | null {
+  if (part === "flashcards") {
+    const cards = (document.flashcards ?? []).filter((card) => card.front.trim() && card.back.trim());
+    return cards.length ? cards.slice(0, MAX_FLASHCARD_COUNT).map((card) => ({ question: card.front, answer: card.back })) as StudyPartItems[P] : null;
+  }
+  const questions = (document.quizQuestions ?? []).filter((question) => question.question.trim() && question.answer.trim());
+  return questions.length ? questions.slice(0, MAX_QUIZ_COUNT).map(quizFromSavedQuestion) as StudyPartItems[P] : null;
+}
+
+async function localizeStudyPart<P extends StudyPart>(items: StudyPartItems[P], part: P, targetLanguage: TargetLanguage): Promise<StudyPartItems[P]> {
+  if (!isLocalLanguage(targetLanguage)) return items;
+  if (part === "flashcards") {
+    const cards = items as LearningPayload["flashcards"];
+    const translated = await translateLearningTexts(cards.flatMap((card) => [card.question, card.answer]), targetLanguage);
+    return cards.map((card, index) => ({
+      question: translated[index * 2] ?? card.question,
+      answer: translated[index * 2 + 1] ?? card.answer
+    })) as StudyPartItems[P];
+  }
+  const quiz = items as LearningPayload["quiz"];
+  const sources = quiz.flatMap((question) => [question.question, ...(question.options ?? []), question.correctAnswer, question.explanation]);
+  const translated = await translateLearningTexts(sources, targetLanguage);
+  let index = 0;
+  const take = () => translated[index++] ?? sources[index - 1] ?? "";
+  return quiz.map((question) => ({
+    ...question,
+    question: take(),
+    options: question.options?.map(take),
+    correctAnswer: take(),
+    explanation: take()
+  })) as StudyPartItems[P];
 }
 
 function replayResourceUnavailableError(): WebMcpActionIdempotencyError {
@@ -572,7 +705,7 @@ async function generateLearningForDocument(
   generator: LearningGenerator,
   document: ReadingDocumentResponse,
   options: LearningGenerationOptions
-): Promise<{ learning: LearningPayload; fallback: boolean }> {
+): Promise<{ learning: LearningPayload; fallback: boolean; aiFailed: boolean }> {
   let learning: LearningPayload;
   let fallback = false;
   try {
@@ -592,14 +725,14 @@ async function generateLearningForDocument(
   }
 
   try {
-    return { learning: await localizeLearningPayload(learning, options.targetLanguage), fallback };
+    return { learning: await localizeLearningPayload(learning, options.targetLanguage), fallback, aiFailed: fallback };
   } catch (error) {
     console.warn("ReadMate returned English study material because local-language translation was unavailable.", {
       documentId: document.id,
       targetLanguage: options.targetLanguage,
       error: error instanceof Error ? error.message : String(error)
     });
-    return { learning, fallback: true };
+    return { learning, fallback: true, aiFailed: fallback };
   }
 }
 
@@ -693,14 +826,19 @@ async function syncGeneratedLearningResiliently(
   repository: LearningRepository,
   userId: string,
   documentId: string,
-  learning: LearningPayload
+  learning: StudySyncPayload
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= LEARNING_SYNC_MAX_ATTEMPTS; attempt += 1) {
     try {
       await repository.syncGeneratedLearning(userId, documentId, learning);
       return true;
     } catch (error) {
-      if (!isDatabaseUnavailableError(error)) throw error;
+      if (!isDatabaseUnavailableError(error)) {
+        // The study material is already saved on the document and returned to
+        // the client; review rows reseed from it. Report pending, not a 500.
+        console.error(JSON.stringify({ event: "learning_sync_failed", documentId, name: error instanceof Error ? error.name : "UnknownError", code: prismaErrorCode(error) }));
+        return false;
+      }
       if (attempt < LEARNING_SYNC_MAX_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         continue;
@@ -716,6 +854,11 @@ async function syncGeneratedLearningResiliently(
 
 async function translateLearningText(text: string, targetLanguage: Exclude<TargetLanguage, "en">): Promise<string> {
   return (await translateEnglishToLocalLanguage(text, targetLanguage)).join(" ").trim() || text;
+}
+
+function prismaErrorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^P\d{4}$/.test(code) ? code : undefined;
 }
 
 function isRecoverableGeminiError(error: unknown): boolean {
@@ -900,50 +1043,62 @@ function tokenize(text: string): string[] {
 }
 
 export class PrismaLearningRepository implements LearningRepository {
-  async syncGeneratedLearning(userId: string, documentId: string, learning: LearningPayload): Promise<void> {
+  async syncGeneratedLearning(userId: string, documentId: string, learning: StudySyncPayload): Promise<void> {
     const prisma = await getPrisma();
     const now = new Date();
     const topicTag = learning.topicTags[0];
     await prisma.$transaction(async (tx) => {
-      const existingCards = await tx.learningFlashcard.findMany({ where: { userId, documentId, deletedAt: null } });
-      const existingCardKeys = new Set<string>();
-      for (const card of learning.flashcards) {
-        const existing = existingCards.find((item) => item.question === card.question);
-        existingCardKeys.add(card.question);
-        if (existing) {
-          await tx.learningFlashcard.update({ where: { id: existing.id }, data: { answer: card.answer, topicTag } });
-        } else {
-          await tx.learningFlashcard.create({ data: { userId, documentId, question: card.question, answer: card.answer, topicTag } });
+      if (learning.flashcards) {
+        const existingCards = await tx.learningFlashcard.findMany({ where: { userId, documentId, deletedAt: null } });
+        const existingCardKeys = new Set<string>();
+        const newCards: Array<{ userId: string; documentId: string; question: string; answer: string; topicTag: string | undefined }> = [];
+        for (const card of learning.flashcards) {
+          if (existingCardKeys.has(card.question)) continue;
+          const existing = existingCards.find((item) => item.question === card.question);
+          existingCardKeys.add(card.question);
+          if (existing) {
+            await tx.learningFlashcard.update({ where: { id: existing.id }, data: { answer: card.answer, topicTag } });
+          } else {
+            newCards.push({ userId, documentId, question: card.question, answer: card.answer, topicTag });
+          }
         }
+        // One insert for all new cards: every query also pays an RLS round trip.
+        if (newCards.length) await tx.learningFlashcard.createMany({ data: newCards });
+        await tx.learningFlashcard.updateMany({
+          where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingCardKeys] } } },
+          data: { deletedAt: now }
+        });
       }
-      await tx.learningFlashcard.updateMany({
-        where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingCardKeys] } } },
-        data: { deletedAt: now }
-      });
 
-      const existingQuestions = await tx.learningQuizQuestion.findMany({ where: { userId, documentId, deletedAt: null } });
-      const existingQuestionKeys = new Set<string>();
-      for (const quiz of learning.quiz) {
-        const existing = existingQuestions.find((item) => item.question === quiz.question);
-        existingQuestionKeys.add(quiz.question);
-        const data = {
-          questionType: quiz.type,
-          options: JSON.stringify(quiz.options ?? []),
-          correctAnswer: quiz.correctAnswer,
-          explanation: quiz.explanation,
-          topicTag
-        };
-        if (existing) {
-          await tx.learningQuizQuestion.update({ where: { id: existing.id }, data });
-        } else {
-          await tx.learningQuizQuestion.create({ data: { userId, documentId, question: quiz.question, ...data } });
+      if (learning.quiz) {
+        const existingQuestions = await tx.learningQuizQuestion.findMany({ where: { userId, documentId, deletedAt: null } });
+        const existingQuestionKeys = new Set<string>();
+        const newQuestions: Array<{ userId: string; documentId: string; question: string; questionType: string; options: string; correctAnswer: string; explanation: string; topicTag: string | undefined }> = [];
+        for (const quiz of learning.quiz) {
+          if (existingQuestionKeys.has(quiz.question)) continue;
+          const existing = existingQuestions.find((item) => item.question === quiz.question);
+          existingQuestionKeys.add(quiz.question);
+          const data = {
+            questionType: quiz.type,
+            options: JSON.stringify(quiz.options ?? []),
+            correctAnswer: quiz.correctAnswer,
+            explanation: quiz.explanation,
+            topicTag
+          };
+          if (existing) {
+            await tx.learningQuizQuestion.update({ where: { id: existing.id }, data });
+          } else {
+            newQuestions.push({ userId, documentId, question: quiz.question, ...data });
+          }
         }
+        if (newQuestions.length) await tx.learningQuizQuestion.createMany({ data: newQuestions });
+        await tx.learningQuizQuestion.updateMany({
+          where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingQuestionKeys] } } },
+          data: { deletedAt: now }
+        });
       }
-      await tx.learningQuizQuestion.updateMany({
-        where: { userId, documentId, deletedAt: null, NOT: { question: { in: [...existingQuestionKeys] } } },
-        data: { deletedAt: now }
-      });
-    });
+    // Prisma's 5 s default is too short once each query pays an RLS round trip to Supabase.
+    }, { maxWait: 5_000, timeout: 20_000 });
   }
 
   async getReview(userId: string, document: ReadingDocumentResponse): Promise<LearningReviewResponse> {

@@ -8,7 +8,7 @@ export default function AboutScreen() {
   const { section } = useLocalSearchParams<{ section?: string }>();
   const showPrivacy = section === "privacy";
   return (
-    <Screen bottomNavigation="/(tabs)/more" contentContainerStyle={{ gap: 22 }}>
+    <Screen narrow bottomNavigation="/(tabs)/more" contentContainerStyle={{ gap: 22 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <NavBackButton label="Back to More" />
         <BrandLockup />

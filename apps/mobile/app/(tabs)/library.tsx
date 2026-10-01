@@ -8,7 +8,7 @@ import { PlaybackBar } from "@/components/playback-bar";
 import { useReadingLibrary } from "@/hooks/use-reading-library";
 import { usePlaybackManager } from "@/playback/playback-manager";
 import type { ReadingDocument } from "@/types";
-import { libraryFilters, matchesLibraryFilter, matchesLibrarySearch, type LibraryFilter } from "@/utils/library-filters";
+import { libraryFilters, librarySortLabels, matchesLibraryFilter, matchesLibrarySearch, nextLibrarySort, sortLibraryDocuments, type LibraryFilter, type LibrarySort } from "@/utils/library-filters";
 
 export default function LibraryScreen() {
   const router = useRouter();
@@ -22,7 +22,11 @@ export default function LibraryScreen() {
   const [playRequest, setPlayRequest] = useState(0);
   const [playerHeight, setPlayerHeight] = useState(0);
 
-  const filteredDocuments = useMemo(() => documents.filter((document) => matchesLibraryFilter(document, filter) && matchesLibrarySearch(document, searchQuery)), [documents, filter, searchQuery]);
+  const [sort, setSort] = useState<LibrarySort>("recent");
+  const filteredDocuments = useMemo(
+    () => sortLibraryDocuments(documents.filter((document) => matchesLibraryFilter(document, filter) && matchesLibrarySearch(document, searchQuery)), sort),
+    [documents, filter, searchQuery, sort]
+  );
   const activeDocument = useMemo(() => {
     const globalDocument = playback.activeDocument;
     return (
@@ -71,15 +75,21 @@ export default function LibraryScreen() {
               {libraryFilters.map((item) => {
                 const selected = item === filter;
                 return (
-                  <Pressable key={item} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setFilter(item)} style={{ flex: item === "Podcasts" ? 1.15 : 1, minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: radius.lg, backgroundColor: selected ? colors.player : colors.surface, borderWidth: 1, borderColor: selected ? colors.player : colors.border }}>
-                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: selected ? "#fffdf8" : colors.text, fontSize: 12, fontWeight: "700" }}>{item}</Text>
+                  <Pressable key={item} accessibilityRole="button" accessibilityLabel={item} accessibilityState={{ selected }} onPress={() => setFilter(item)} style={{ flex: item === "Podcasts" ? 1.15 : 1, minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: radius.lg, backgroundColor: selected ? colors.player : colors.surface, borderWidth: 1, borderColor: selected ? colors.player : colors.border }}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: selected ? "#fffdf8" : colors.text, fontSize: 12, fontWeight: "700" }}>{item === "Documents" ? "Docs" : item}</Text>
                   </Pressable>
                 );
               })}
-              <Pressable accessibilityRole="button" accessibilityLabel="Library filters" style={{ width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Sort library: ${librarySortLabels[sort]}`}
+                accessibilityHint="Changes the library order"
+                onPress={() => setSort(nextLibrarySort)}
+                style={{ width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
                 <AppIcon name="line.3.horizontal" size={19} color={colors.text} />
               </Pressable>
             </View>
+            <Text selectable style={{ marginTop: -12, color: colors.muted, fontSize: 12.5, fontWeight: "600" }}>Sorted by: {librarySortLabels[sort]}</Text>
 
             {documentsQuery.isLoading ? <ActivityIndicator color={colors.blue} /> : null}
           </View>

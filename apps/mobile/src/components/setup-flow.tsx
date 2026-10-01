@@ -1,33 +1,33 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppIcon, type AppIconName } from "@/components/app-icon";
-import { ActionButton, BrandLockup, colors, radius } from "@/components/mobile-design";
+import { AppIcon } from "@/components/app-icon";
+import { ActionButton, BrandLockup, colors, phoneContentMaxWidth, radius } from "@/components/mobile-design";
+import { GEMINI_READING_VOICES } from "@/config/tts-providers";
+import { SETUP_CONTENT_TYPES, SETUP_SPEEDS, type SetupPreferences } from "@/setup/setup-preferences";
 
-type SetupStep = "voice" | "topics" | "extension";
+type SetupStep = "voice" | "content" | "extension";
+type ContentType = SetupPreferences["preferredContentTypes"][number];
 
-const voices = [
-  { id: "Isla", description: "Warm and unhurried · British", icon: "waveform" as AppIconName },
-  { id: "Atlas", description: "Clear and steady · good for study", icon: "waveform" as AppIconName },
-  { id: "Marlow", description: "Bright and conversational", icon: "waveform" as AppIconName }
-];
+// Gemini Flash-Lite voices are available on every plan, so setup never offers
+// a choice the account cannot play.
+const voices = GEMINI_READING_VOICES.slice(0, 4);
+const useNativeDriver = Platform.OS !== "web";
 
-const topics = ["Science & psychology", "Design & architecture", "Technology", "Business", "Climate & nature", "Health", "History", "Fiction"];
-
-export function SetupFlow({ onComplete }: { onComplete: () => void }) {
+export function SetupFlow({ onComplete }: { onComplete: (preferences?: SetupPreferences) => void }) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<SetupStep>("voice");
-  const [voice, setVoice] = useState("Isla");
-  const [speed, setSpeed] = useState("1.25×");
-  const [selectedTopics, setSelectedTopics] = useState(new Set([topics[0], topics[1]]));
+  const [voice, setVoice] = useState<string>(voices[0].id);
+  const [speed, setSpeed] = useState<number>(1);
+  const [contentTypes, setContentTypes] = useState<Set<ContentType>>(new Set(SETUP_CONTENT_TYPES.map((item) => item.id)));
   const opacity = useRef(new Animated.Value(1)).current;
   const offset = useRef(new Animated.Value(0)).current;
 
-  const stepIndex = step === "voice" ? 0 : step === "topics" ? 1 : 2;
+  const stepIndex = step === "voice" ? 0 : step === "content" ? 1 : 2;
   const transitionTo = (next: SetupStep) => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 140, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(offset, { toValue: -10, duration: 140, easing: Easing.in(Easing.cubic), useNativeDriver: true })
+      Animated.timing(opacity, { toValue: 0, duration: 140, easing: Easing.in(Easing.cubic), useNativeDriver }),
+      Animated.timing(offset, { toValue: -10, duration: 140, easing: Easing.in(Easing.cubic), useNativeDriver })
     ]).start(() => {
       offset.setValue(10);
       setStep(next);
@@ -36,63 +36,75 @@ export function SetupFlow({ onComplete }: { onComplete: () => void }) {
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(offset, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+      Animated.timing(opacity, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver }),
+      Animated.timing(offset, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver })
     ]).start();
   }, [offset, opacity, step]);
 
   const next = () => {
-    if (step === "voice") return transitionTo("topics");
-    if (step === "topics") return transitionTo("extension");
-    onComplete();
+    if (step === "voice") return transitionTo("content");
+    if (step === "content") return transitionTo("extension");
+    onComplete({ voice, speed, preferredContentTypes: SETUP_CONTENT_TYPES.map((item) => item.id).filter((id) => contentTypes.has(id)) });
   };
+
+  const toggleContentType = (type: ContentType) => setContentTypes((current) => {
+    const nextSet = new Set(current);
+    if (nextSet.has(type)) {
+      if (nextSet.size > 1) nextSet.delete(type);
+    } else {
+      nextSet.add(type);
+    }
+    return nextSet;
+  });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 16) }]}>
       <View style={styles.topBar}>
         <BrandLockup />
-        <Pressable accessibilityRole="button" accessibilityLabel="Skip setup" onPress={onComplete} hitSlop={10}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Skip setup" onPress={() => onComplete()} hitSlop={10}>
           <Text style={styles.skip}>Skip</Text>
         </Pressable>
       </View>
-      <View style={styles.progressRow}>
-        {([0, 1, 2] as const).map((index) => <View key={index} style={[styles.progressDot, index === stepIndex ? styles.progressDotActive : styles.progressDotInactive]} />)}
-      </View>
-      <Animated.View style={[styles.content, { opacity, transform: [{ translateY: offset }] }]}>
-        {step === "voice" ? <VoiceStep voice={voice} speed={speed} onVoice={setVoice} onSpeed={setSpeed} /> : null}
-        {step === "topics" ? <TopicsStep selectedTopics={selectedTopics} onToggle={(topic) => setSelectedTopics((current) => { const nextSet = new Set(current); if (nextSet.has(topic)) nextSet.delete(topic); else nextSet.add(topic); return nextSet; })} /> : null}
-        {step === "extension" ? <ExtensionStep /> : null}
-      </Animated.View>
-      <View style={styles.footer}>
-        <ActionButton label={step === "extension" ? "Get started" : "Continue"} tone="navy" onPress={next} style={styles.continueButton} />
+      <View style={styles.column}>
+        <View style={styles.progressRow} accessibilityRole="progressbar" accessibilityLabel={`Step ${stepIndex + 1} of 3`}>
+          {([0, 1, 2] as const).map((index) => <View key={index} style={[styles.progressDot, index === stepIndex ? styles.progressDotActive : styles.progressDotInactive]} />)}
+        </View>
+        <Animated.View style={[styles.content, { opacity, transform: [{ translateY: offset }] }]}>
+          {step === "voice" ? <VoiceStep voice={voice} speed={speed} onVoice={setVoice} onSpeed={setSpeed} /> : null}
+          {step === "content" ? <ContentStep selected={contentTypes} onToggle={toggleContentType} /> : null}
+          {step === "extension" ? <ExtensionStep /> : null}
+        </Animated.View>
+        <View style={styles.footer}>
+          <ActionButton label={step === "extension" ? "Get started" : "Continue"} tone="navy" onPress={next} style={styles.continueButton} />
+        </View>
       </View>
     </View>
   );
 }
 
-function VoiceStep({ voice, speed, onVoice, onSpeed }: { voice: string; speed: string; onVoice: (value: string) => void; onSpeed: (value: string) => void }) {
+function VoiceStep({ voice, speed, onVoice, onSpeed }: { voice: string; speed: number; onVoice: (value: string) => void; onSpeed: (value: number) => void }) {
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
       <Text style={styles.eyebrow}>SET UP · 1 OF 3</Text>
-      <View style={styles.headingGroup}><Text style={styles.title}>Choose a voice</Text><Text style={styles.subtitle}>Every voice is AI-generated. Pick the one you want to spend time with.</Text></View>
+      <View style={styles.headingGroup}><Text style={styles.title}>Choose a voice</Text><Text style={styles.subtitle}>Every voice is AI-generated by Gemini. Pick the one you want to spend time with — you can change it later.</Text></View>
       <View style={styles.voiceList}>
         {voices.map((item) => {
           const selected = item.id === voice;
-          return <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => onVoice(item.id)} style={[styles.voiceRow, selected && styles.voiceRowSelected]}>
-            <View style={[styles.voiceIcon, selected && styles.voiceIconSelected]}><AppIcon name={item.icon} size={20} color={selected ? colors.surface : colors.blue} /></View>
-            <View style={styles.voiceText}><Text style={styles.voiceName}>{item.id}</Text><Text style={styles.voiceDescription}>{item.description}</Text></View>
+          return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${item.name}, ${item.description} voice`} accessibilityState={{ selected }} onPress={() => onVoice(item.id)} style={[styles.voiceRow, selected && styles.voiceRowSelected]}>
+            <View style={[styles.voiceIcon, selected && styles.voiceIconSelected]}><AppIcon name="waveform" size={20} color={selected ? colors.surface : colors.blue} /></View>
+            <View style={styles.voiceText}><Text style={styles.voiceName}>{item.name}</Text><Text style={styles.voiceDescription}>{item.description} · Gemini Flash-Lite</Text></View>
             <AppIcon name={selected ? "checkmark.circle.fill" : "circle"} size={20} color={selected ? colors.blue : "#c9c4b6"} />
           </Pressable>;
         })}
       </View>
-      <View style={styles.controlGroup}><Text style={styles.controlLabel}>How fast should ReadMate read?</Text><View style={styles.pillRow}>{["1×", "1.25×", "1.5×", "2×"].map((item) => <Pressable key={item} onPress={() => onSpeed(item)} style={[styles.pill, speed === item && styles.pillSelected]}><Text style={[styles.pillText, speed === item && styles.pillTextSelected]}>{item}</Text></Pressable>)}</View></View>
-      <View style={styles.quote}><Text style={styles.quoteText}>“Our attention is a finite resource. Focus isn’t about doing more — it’s about choosing what matters.”</Text><View style={styles.quoteMeta}><AppIcon name="sparkles" size={14} color={colors.faint} /><Text style={styles.quoteMetaText}>Sample · AI-generated speech</Text></View></View>
+      <View style={styles.controlGroup}><Text style={styles.controlLabel}>How fast should ReadMate read?</Text><View style={styles.pillRow}>{SETUP_SPEEDS.map((item) => <Pressable key={item} accessibilityRole="button" accessibilityState={{ selected: speed === item }} accessibilityLabel={`${item} times speed`} onPress={() => onSpeed(item)} style={[styles.pill, speed === item && styles.pillSelected]}><Text style={[styles.pillText, speed === item && styles.pillTextSelected]}>{item}×</Text></Pressable>)}</View></View>
+      <View style={styles.quote}><Text style={styles.quoteText}>“Our attention is a finite resource. Focus isn’t about doing more — it’s about choosing what matters.”</Text><View style={styles.quoteMeta}><AppIcon name="sparkles" size={14} color={colors.faint} /><Text style={styles.quoteMetaText}>Preview any voice later in Settings</Text></View></View>
     </ScrollView>
   );
 }
 
-function TopicsStep({ selectedTopics, onToggle }: { selectedTopics: Set<string>; onToggle: (topic: string) => void }) {
-  return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}><Text style={styles.eyebrow}>SET UP · 2 OF 3</Text><View style={styles.headingGroup}><Text style={styles.title}>What do you like to read?</Text><Text style={styles.subtitle}>Pick a few topics to shape your first recommendations.</Text></View><View style={styles.topicWrap}>{topics.map((topic) => <Pressable key={topic} onPress={() => onToggle(topic)} style={[styles.topicPill, selectedTopics.has(topic) && styles.topicPillSelected]}><Text style={[styles.topicLabel, selectedTopics.has(topic) && styles.topicLabelSelected]}>{topic}</Text></Pressable>)}</View><View style={styles.topicIllustration}><AppIcon name="books.vertical" size={38} color={colors.blue} /><View style={styles.connectorDots}>{[0, 1, 2].map((index) => <View key={index} style={[styles.connectorDot, index === 1 && styles.connectorDotMid]} />)}</View><AppIcon name="headphones" size={38} color={colors.blue} /></View></ScrollView>;
+function ContentStep({ selected, onToggle }: { selected: Set<ContentType>; onToggle: (type: ContentType) => void }) {
+  return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}><Text style={styles.eyebrow}>SET UP · 2 OF 3</Text><View style={styles.headingGroup}><Text style={styles.title}>What will you listen to?</Text><Text style={styles.subtitle}>Choose what you plan to bring to ReadMate. You can change this any time in Settings.</Text></View><View style={styles.topicWrap}>{SETUP_CONTENT_TYPES.map((item) => { const active = selected.has(item.id); return <Pressable key={item.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => onToggle(item.id)} style={[styles.topicPill, active && styles.topicPillSelected]}><Text style={[styles.topicLabel, active && styles.topicLabelSelected]}>{item.label}</Text></Pressable>; })}</View><View style={styles.topicIllustration}><AppIcon name="books.vertical" size={38} color={colors.blue} /><View style={styles.connectorDots}>{[0, 1, 2].map((index) => <View key={index} style={[styles.connectorDot, index === 1 && styles.connectorDotMid]} />)}</View><AppIcon name="headphones" size={38} color={colors.blue} /></View></ScrollView>;
 }
 
 function ExtensionStep() {
@@ -103,7 +115,8 @@ function CheckRow({ text }: { text: string }) { return <View style={styles.check
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 22 },
-  topBar: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  topBar: { width: "100%", maxWidth: 1180, alignSelf: "center", minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  column: { flex: 1, width: "100%", maxWidth: phoneContentMaxWidth, alignSelf: "center" },
   skip: { color: colors.claret, fontSize: 15, fontWeight: "700" },
   progressRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10, paddingVertical: 16 },
   progressDot: { width: 9, height: 9, borderRadius: 5 },

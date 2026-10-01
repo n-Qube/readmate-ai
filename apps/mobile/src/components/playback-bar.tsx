@@ -1,4 +1,6 @@
 import * as Haptics from "expo-haptics";
+import { documentBlockCount } from "@/utils/document-blocks";
+import { estimateListeningSeconds } from "@/components/content-card";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Alert, Platform, Pressable, Text, View, type TextStyle } from "react-native";
@@ -37,6 +39,9 @@ const languageOptions: Array<{ code: UserSettings["targetLanguage"]; label: stri
   { code: "gaa", label: "Ga", icon: "star.fill" }
 ];
 
+// The last English voice per provider, so Twi -> English restores it (session only).
+const lastEnglishVoiceByProvider = new Map<UserSettings["provider"], string>();
+
 export function PlaybackBar({
   document,
   queue = [],
@@ -60,13 +65,18 @@ export function PlaybackBar({
   const previousDocument = queueIndex > 0 ? queue[queueIndex - 1] : undefined;
   const nextDocument = queueIndex >= 0 && queueIndex < queue.length - 1 ? queue[queueIndex + 1] : undefined;
   const activeBlockIndex = isActiveDocument ? playback.activeBlockIndex : normalizedBlockIndex(document);
-  const blockCount = activeDocument?.blocks.length ?? 0;
+  const blockCount = documentBlockCount(activeDocument);
+  // Settings apply optimistically, so play/pause never waits for a save; only
+  // controls that change settings are held while one is in flight.
   const playbackBlocked = playbackDisabled || settingsSaving;
-  const canPlay = Boolean(activeDocument?.blocks.length) && !playbackBlocked;
+  const canPlay = blockCount > 0 && !playbackDisabled;
   const currentState = isActiveDocument ? playback.state : "ready";
   const percent = isActiveDocument ? playback.percent : document?.progress.percent ?? playback.percent;
-  const totalDuration = isActiveDocument ? playback.duration : estimateDuration(activeDocument);
-  const currentTime = isActiveDocument ? playback.currentTime : Math.round(totalDuration * (percent / 100));
+  // Until the audio loads its duration is 0; show the reading-time estimate
+  // rather than "1 sec left" while preparing.
+  const hasLiveDuration = isActiveDocument && playback.duration > 0;
+  const totalDuration = hasLiveDuration ? playback.duration : estimateDuration(activeDocument);
+  const currentTime = hasLiveDuration ? playback.currentTime : Math.round(totalDuration * (percent / 100));
   const remaining = Math.max(0, totalDuration - currentTime);
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const isCompleted = clampedPercent >= 100 && !["playing", "loading", "buffering"].includes(currentState);
@@ -80,19 +90,19 @@ export function PlaybackBar({
   }, [isActiveDocument, playback.activeBlockIndex, onActiveBlockChange]);
 
   useEffect(() => {
-    if (!activeDocument || autoPlayKey === 0 || playbackBlocked) return;
+    if (!activeDocument || autoPlayKey === 0 || playbackDisabled) return;
     void playback.playDocument(activeDocument);
-  }, [autoPlayKey, activeDocument?.id, playbackBlocked]);
+  }, [autoPlayKey, activeDocument?.id, playbackDisabled]);
 
   function toggle() {
-    if (!activeDocument || playbackBlocked) return;
+    if (!activeDocument || playbackDisabled) return;
     void tactile("medium");
     if (isCompleted) void playback.playDocument(activeDocument, 0);
     else void playback.toggleDocument(activeDocument);
   }
 
   function jumpToDocument(next: ReadingDocument | undefined) {
-    if (!next || playbackBlocked) return;
+    if (!next || playbackDisabled) return;
     onDocumentChange?.(next);
     void playback.playDocument(next);
   }
@@ -100,7 +110,8 @@ export function PlaybackBar({
   function changeLanguage(targetLanguage: UserSettings["targetLanguage"]) {
     if (playbackBlocked || !settings || !onSettingsChange || targetLanguage === settings.targetLanguage) return;
     void tactile("light");
-    const voice = voiceForPlayerLanguage(settings.provider, settings.voice, targetLanguage);
+    if (settings.targetLanguage === "en") lastEnglishVoiceByProvider.set(settings.provider, settings.voice);
+    const voice = voiceForPlayerLanguage(settings.provider, settings.voice, targetLanguage, lastEnglishVoiceByProvider.get(settings.provider));
     onSettingsChange({ ...settings, targetLanguage, voice });
   }
 
@@ -283,7 +294,7 @@ export function PlaybackBar({
         {!screenshotMode && playback.error && isActiveDocument ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: radius.md, backgroundColor: colors.redSoft }}>
             <Text selectable style={{ flex: 1, color: colors.red, fontSize: 13, lineHeight: 18 }}>{playback.error}</Text>
-            <Pressable disabled={playbackBlocked} accessibilityLabel="Retry playback" onPress={toggle} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: colors.claret, opacity: playbackBlocked ? 0.45 : 1 }}>
+            <Pressable disabled={playbackDisabled} accessibilityLabel="Retry playback" onPress={toggle} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: colors.claret, opacity: playbackDisabled ? 0.45 : 1 }}>
               <Text style={{ color: "#fffdf8", fontWeight: "800" }}>Retry</Text>
             </Pressable>
           </View>
@@ -513,10 +524,7 @@ function formatDuration(seconds: number): string {
 }
 
 function estimateDuration(document?: ReadingDocument): number {
-  if (!document) return 0;
-  if (document.estimatedListeningSeconds) return document.estimatedListeningSeconds;
-  const words = document.blocks.reduce((sum, block) => sum + block.text.trim().split(/\s+/).filter(Boolean).length, 0);
-  return Math.max(30, Math.round((words / 160) * 60 / Math.max(0.5, document.speed)));
+  return document ? estimateListeningSeconds(document) : 0;
 }
 
 function shortSectionTitle(value: string): string {

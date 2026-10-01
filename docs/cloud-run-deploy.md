@@ -19,7 +19,6 @@ Production deployments use `cloudbuild.yaml`; do not deploy from a developer lap
    - `readmate-supabase-service-role-key`
    - `readmate-gemini-api-key`
    - `readmate-khaya-api-key`
-   - `readmate-cartesia-api-key`
    - `readmate-cron-secret`
    - `readmate-webmcp-audit-digest-key` (stable random value, at least 32 characters; preferably 32 random bytes encoded as base64 or hex)
 
@@ -105,3 +104,28 @@ The promotion script revalidates the tag, image digest, Ready state, 0% allocati
 After promotion, verify the service URL, one authenticated read, one write, TTS, and monitoring. Retain the prior production revision name as the rollback target.
 
 Use `docs/production-readiness-runbook.md` for rollback, backup restore, monitoring, budgets, and credential rotation.
+
+## Pending PDF cleanup claims
+
+The `20261001120000_claim_upload_cleanup` migration adds nullable
+`UploadedFile.cleanupStartedAt` and a constraint prohibiting claimed uploads
+from being bound to a document. Apply it before deploying the cleanup fix.
+Cleanup commits the claim under the same user/row locks used by conversion,
+then deletes storage and finally releases the quota reservation. Storage errors
+and restarts keep the claim and reservation for later cleanup retries; clients
+must upload the PDF again rather than convert a claimed object. Converted
+uploads are never claimed. The constraint also prevents older conversion code
+from binding claimed uploads during a rollout or code rollback.
+
+This marker does not make an older cleanup worker safe: rollback to a revision
+with the previous cleanup implementation requires a separately built and
+verified rollback revision configured with `ENABLE_UPLOAD_CLEANUP_WORKER=false`
+until the fixed code is restored, or a verified revision predating the worker.
+Cloud Run revisions are immutable: an existing unsafe revision cannot have its
+environment changed in place. Do not promote that old revision directly.
+Retain this additive migration when rolling back code.
+
+Hosted `release-gates` now provisions a disposable PostgreSQL 16 service,
+applies every migration, and runs the conversion/cleanup regressions as
+`readmate_api` (NOSUPERUSER, NOBYPASSRLS). Its trust authentication is limited
+to the temporary CI database; no production database credentials are used.

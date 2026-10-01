@@ -68,7 +68,7 @@ print("\t".join([
 # Cloud Run treats literal environment variables and Secret Manager-backed
 # variables as different update types. Remove any legacy literal credentials
 # in the same no-traffic deployment that adds their existing secret references.
-SECRET_ENV_KEYS="CLERK_SECRET_KEY,CLERK_PUBLISHABLE_KEY,DATABASE_URL,SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY,GEMINI_API_KEY,KHAYA_API_KEY,CARTESIA_API_KEY,REVENUECAT_SECRET_API_KEY,WEBMCP_AUDIT_DIGEST_KEY,CRON_SECRET"
+SECRET_ENV_KEYS="CLERK_SECRET_KEY,CLERK_PUBLISHABLE_KEY,DATABASE_URL,SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY,GEMINI_API_KEY,KHAYA_API_KEY,REVENUECAT_SECRET_API_KEY,WEBMCP_AUDIT_DIGEST_KEY,CRON_SECRET"
 
 if [[ ! "${SERVICE_NAME}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]]; then
   fail "SERVICE_NAME must be a lowercase Cloud Run service name."
@@ -115,10 +115,12 @@ if ! "${PYTHON}" -c 'import sys; from urllib.parse import urlsplit; u=urlsplit(s
   fail "WEB_APP_ORIGIN must be one exact HTTPS origin without credentials, a path, query, or fragment."
 fi
 
-RUNTIME_SECRET_MAPPINGS="CLERK_SECRET_KEY=readmate-clerk-secret-key:latest,CLERK_PUBLISHABLE_KEY=readmate-clerk-publishable-key:latest,DATABASE_URL=readmate-database-app-url:latest,SUPABASE_URL=readmate-supabase-url:latest,SUPABASE_SERVICE_ROLE_KEY=readmate-supabase-service-role-key:latest,GEMINI_API_KEY=readmate-gemini-api-key:latest,KHAYA_API_KEY=readmate-khaya-api-key:latest,CARTESIA_API_KEY=readmate-cartesia-api-key:latest,WEBMCP_AUDIT_DIGEST_KEY=readmate-webmcp-audit-digest-key:latest,CRON_SECRET=readmate-cron-secret:latest"
-RUNTIME_ENV_VARS="NODE_ENV=production,DATABASE_APP_ROLE=readmate_api,DATABASE_CONNECTION_LIMIT=2,DATABASE_POOL_TIMEOUT_SECONDS=30,ALLOW_ANONYMOUS_TTS=false,EXTENSION_ORIGIN=${EXTENSION_ORIGIN},WEB_APP_ORIGIN=${WEB_APP_ORIGIN},SUPABASE_STORAGE_BUCKET=readmate-uploads,SUPABASE_MEDIA_BUCKET=readmate-media,OUTBOUND_REQUEST_TIMEOUT_MS=15000,DOCUMENT_PROCESSING_CONCURRENCY=2,TTS_DAILY_CHAR_LIMIT=500000,AI_DAILY_INPUT_CHAR_LIMIT=250000,UPLOAD_DAILY_BYTE_LIMIT=209715200,UPLOAD_TOTAL_BYTE_LIMIT=1073741824,UPLOAD_TOTAL_OBJECT_LIMIT=1000,UPLOAD_PENDING_OBJECT_LIMIT=20,KHAYA_SUBSCRIPTION_HEADER=Ocp-Apim-Subscription-Key,KHAYA_TTS_SPEAKER_ID=male_low,TWI_TTS_PROVIDER=nano-twi,NANO_TWI_NUM_THREADS=1,CARTESIA_VOICE_ID=79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e,CARTESIA_MODEL_ID=sonic-3,ENABLE_RSS_REFRESH_WORKER=true,RSS_REFRESH_INTERVAL_MINUTES=30,FREE_MAX_UPLOAD_BYTES=10485760,FREE_MAX_DOCUMENT_CHARACTERS=100000,FREE_MAX_PDF_PAGES=50,FREE_TTS_DAILY_CHAR_LIMIT=25000,PREMIUM_MAX_UPLOAD_BYTES=52428800,PREMIUM_MAX_DOCUMENT_CHARACTERS=10000000,PREMIUM_MAX_PDF_PAGES=2000,PREMIUM_TTS_DAILY_CHAR_LIMIT=500000"
-ENV_VARS_TO_REMOVE="${SECRET_ENV_KEYS}"
-OPTIONAL_SECRET_ARG=""
+RUNTIME_SECRET_MAPPINGS="CLERK_SECRET_KEY=readmate-clerk-secret-key:latest,CLERK_PUBLISHABLE_KEY=readmate-clerk-publishable-key:latest,DATABASE_URL=readmate-database-app-url:latest,SUPABASE_URL=readmate-supabase-url:latest,SUPABASE_SERVICE_ROLE_KEY=readmate-supabase-service-role-key:latest,GEMINI_API_KEY=readmate-gemini-api-key:latest,KHAYA_API_KEY=readmate-khaya-api-key:latest,WEBMCP_AUDIT_DIGEST_KEY=readmate-webmcp-audit-digest-key:latest,CRON_SECRET=readmate-cron-secret:latest"
+RUNTIME_ENV_VARS="NODE_ENV=production,DATABASE_APP_ROLE=readmate_api,DATABASE_CONNECTION_LIMIT=2,DATABASE_POOL_TIMEOUT_SECONDS=30,ALLOW_ANONYMOUS_TTS=false,EXTENSION_ORIGIN=${EXTENSION_ORIGIN},WEB_APP_ORIGIN=${WEB_APP_ORIGIN},SUPABASE_STORAGE_BUCKET=readmate-uploads,SUPABASE_MEDIA_BUCKET=readmate-media,OUTBOUND_REQUEST_TIMEOUT_MS=15000,DOCUMENT_PROCESSING_CONCURRENCY=2,TTS_DAILY_CHAR_LIMIT=500000,AI_DAILY_INPUT_CHAR_LIMIT=250000,UPLOAD_DAILY_BYTE_LIMIT=209715200,UPLOAD_TOTAL_BYTE_LIMIT=1073741824,UPLOAD_TOTAL_OBJECT_LIMIT=1000,UPLOAD_PENDING_OBJECT_LIMIT=20,KHAYA_SUBSCRIPTION_HEADER=Ocp-Apim-Subscription-Key,KHAYA_TTS_SPEAKER_ID=male_low,TWI_TTS_PROVIDER=nano-twi,NANO_TWI_NUM_THREADS=1,GEMINI_TTS_MODEL=gemini-3.8-flash-tts,GEMINI_TTS_LITE_MODEL=gemini-3.8-flash-lite-tts,GEMINI_TTS_TIMEOUT_MS=45000,GEMINI_LEARNING_TIMEOUT_MS=45000,ENABLE_RSS_REFRESH_WORKER=true,RSS_REFRESH_INTERVAL_MINUTES=30,FREE_MAX_UPLOAD_BYTES=10485760,FREE_MAX_DOCUMENT_CHARACTERS=100000,FREE_MAX_PDF_PAGES=50,FREE_TTS_DAILY_CHAR_LIMIT=25000,PREMIUM_MAX_UPLOAD_BYTES=52428800,PREMIUM_MAX_DOCUMENT_CHARACTERS=10000000,PREMIUM_MAX_PDF_PAGES=2000,PREMIUM_TTS_DAILY_CHAR_LIMIT=500000"
+# Retired providers: omission alone would keep their old bindings on the
+# service, so strip them explicitly (Cartesia was retired on 2026-09-23).
+ENV_VARS_TO_REMOVE="${SECRET_ENV_KEYS},CARTESIA_VOICE_ID,CARTESIA_MODEL_ID"
+SECRETS_TO_REMOVE="CARTESIA_API_KEY"
 
 if [[ "${ENABLE_REVENUECAT}" == "true" ]]; then
   RUNTIME_SECRET_MAPPINGS+=",REVENUECAT_SECRET_API_KEY=readmate-revenuecat-secret-api-key:latest"
@@ -126,9 +128,34 @@ if [[ "${ENABLE_REVENUECAT}" == "true" ]]; then
 else
   # Omission alone would preserve an older Cloud Run binding. Remove both the
   # secret reference and entitlement id so billing-disabled releases stay Free.
-  OPTIONAL_SECRET_ARG="--remove-secrets=REVENUECAT_SECRET_API_KEY"
+  SECRETS_TO_REMOVE="REVENUECAT_SECRET_API_KEY,${SECRETS_TO_REMOVE}"
   ENV_VARS_TO_REMOVE+=",REVENUECAT_ENTITLEMENT_ID"
 fi
+OPTIONAL_SECRET_ARG="--remove-secrets=${SECRETS_TO_REMOVE}"
+
+# Pin every secret to the exact version that is current now, so this revision
+# (and any later rollback to it) keeps the credentials it was tested with even
+# if a secret is rotated. If the build identity may not read version metadata,
+# keep ":latest" and say so rather than failing the deploy.
+pin_secret_versions() {
+  local pinned="" mapping env_name secret_ref secret_name version
+  IFS=',' read -ra mappings <<<"${RUNTIME_SECRET_MAPPINGS}"
+  for mapping in "${mappings[@]}"; do
+    env_name="${mapping%%=*}"
+    secret_ref="${mapping#*=}"
+    secret_name="${secret_ref%%:*}"
+    version="$("${GCLOUD}" secrets versions describe latest --secret="${secret_name}" --project="${PROJECT_ID}" --format='value(name.basename())' 2>/dev/null || true)"
+    if [[ "${version}" =~ ^[0-9]+$ ]]; then
+      pinned+="${pinned:+,}${env_name}=${secret_name}:${version}"
+      echo "secret_pin=${secret_name}:${version}"
+    else
+      pinned+="${pinned:+,}${mapping}"
+      echo "secret_pin=${secret_name}:latest (WARNING: could not resolve version)"
+    fi
+  done
+  RUNTIME_SECRET_MAPPINGS="${pinned}"
+}
+pin_secret_versions
 
 ARTIFACT_JSON="$("${GCLOUD}" artifacts docker images describe "${IMAGE_TAG}" \
   --project="${PROJECT_ID}" \
@@ -155,7 +182,7 @@ IMMUTABLE_IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
-  --memory 512Mi \
+  --memory 2Gi \
   --cpu 1 \
   --concurrency 10 \
   --timeout 60 \

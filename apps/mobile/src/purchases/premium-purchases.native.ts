@@ -12,6 +12,7 @@ import {
   type PremiumPackageDescriptor,
   type PremiumPurchaseResult
 } from "@/purchases/premium-packages";
+import { premiumPurchasesEnabled } from "@/purchases/purchases-availability";
 
 const appleApiKey = process.env.EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY ?? "";
 const googleApiKey = process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_API_KEY ?? "";
@@ -24,6 +25,7 @@ let purchasesOperationQueue: Promise<void> = Promise.resolve();
 type PurchasesStatic = (typeof import("react-native-purchases"))["default"];
 
 export async function initializePremiumPurchases(appUserId: string): Promise<void> {
+  if (!premiumPurchasesEnabled) return;
   await withPremiumIdentity(appUserId, async () => undefined);
 }
 
@@ -46,6 +48,7 @@ export async function getPremiumPurchaseState(appUserId: string, forceRefresh = 
 }
 
 async function ensurePremiumIdentity(Purchases: PurchasesStatic, appUserId: string): Promise<void> {
+  if (!premiumPurchasesEnabled) throw new Error("Premium upgrades aren't available in this version of ReadMate yet.");
   const apiKey = apiKeyForPlatform();
   if (!apiKey) {
     throw new Error("Premium purchases are not configured in this build. Install the latest ReadMate build or contact support.");

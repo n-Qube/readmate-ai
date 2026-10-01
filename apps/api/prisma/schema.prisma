@@ -153,6 +153,7 @@ model UploadedFile {
   byteSize   Int
   storageKey String
   createdAt  DateTime @default(now())
+  cleanupStartedAt DateTime?
 
   @@index([userId, createdAt])
 }

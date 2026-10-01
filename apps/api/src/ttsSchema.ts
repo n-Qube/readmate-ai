@@ -1,8 +1,101 @@
 import { z } from "zod";
 import { isLocalLanguage, normalizeLocalLanguageVoice, normalizeTargetLanguage, SUPPORTED_TARGET_LANGUAGES } from "./localLanguage.js";
 
-export const TTS_PROVIDERS = ["google", "cartesia"] as const;
+/**
+ * `gemini` is Gemini 3.8 Flash TTS (highest fidelity, Premium) and
+ * `gemini-lite` is Gemini 3.8 Flash-Lite TTS (cost-efficient, all plans).
+ */
+export const TTS_PROVIDERS = ["google", "gemini", "gemini-lite"] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
+export type GeminiTtsProvider = Extract<TtsProvider, "gemini" | "gemini-lite">;
+
+const PREMIUM_TTS_PROVIDERS: ReadonlySet<TtsProvider> = new Set(["gemini"]);
+
+/** English voices from these providers are billed to ReadMate Premium. */
+export function isPremiumTtsProvider(provider: TtsProvider): boolean {
+  return PREMIUM_TTS_PROVIDERS.has(provider);
+}
+
+export function isGeminiTtsProvider(provider: unknown): provider is GeminiTtsProvider {
+  return provider === "gemini" || provider === "gemini-lite";
+}
+
+/** Prebuilt Gemini speech voices; both 3.8 TTS models share this catalogue. */
+export const GEMINI_TTS_VOICES = [
+  "Kore",
+  "Charon",
+  "Aoede",
+  "Puck",
+  "Zephyr",
+  "Fenrir",
+  "Leda",
+  "Orus",
+  "Callirrhoe",
+  "Autonoe",
+  "Enceladus",
+  "Iapetus",
+  "Umbriel",
+  "Algieba",
+  "Despina",
+  "Erinome",
+  "Algenib",
+  "Rasalgethi",
+  "Laomedeia",
+  "Achernar",
+  "Alnilam",
+  "Schedar",
+  "Gacrux",
+  "Pulcherrima",
+  "Achird",
+  "Zubenelgenubi",
+  "Vindemiatrix",
+  "Sadachbia",
+  "Sadaltager",
+  "Sulafat"
+] as const;
+
+const GEMINI_VOICE_DESCRIPTIONS: Record<(typeof GEMINI_TTS_VOICES)[number], string> = {
+  Kore: "Firm",
+  Charon: "Informative",
+  Aoede: "Breezy",
+  Puck: "Upbeat",
+  Zephyr: "Bright",
+  Fenrir: "Excitable",
+  Leda: "Youthful",
+  Orus: "Firm",
+  Callirrhoe: "Easy-going",
+  Autonoe: "Bright",
+  Enceladus: "Breathy",
+  Iapetus: "Clear",
+  Umbriel: "Easy-going",
+  Algieba: "Smooth",
+  Despina: "Smooth",
+  Erinome: "Clear",
+  Algenib: "Gravelly",
+  Rasalgethi: "Informative",
+  Laomedeia: "Upbeat",
+  Achernar: "Soft",
+  Alnilam: "Firm",
+  Schedar: "Even",
+  Gacrux: "Mature",
+  Pulcherrima: "Forward",
+  Achird: "Friendly",
+  Zubenelgenubi: "Casual",
+  Vindemiatrix: "Gentle",
+  Sadachbia: "Lively",
+  Sadaltager: "Knowledgeable",
+  Sulafat: "Warm"
+};
+
+export const GEMINI_TTS_VOICE_OPTIONS = GEMINI_TTS_VOICES.map((id) => ({
+  id,
+  name: id,
+  description: GEMINI_VOICE_DESCRIPTIONS[id]
+}));
+
+export function isGeminiTtsVoice(voice: unknown): voice is (typeof GEMINI_TTS_VOICES)[number] {
+  return typeof voice === "string" && (GEMINI_TTS_VOICES as readonly string[]).includes(voice);
+}
 
 export const GOOGLE_TTS_VOICES = [
   "en-US-Neural2-F",
@@ -19,7 +112,8 @@ export const GOOGLE_TTS_VOICES = [
 
 export const DEFAULT_VOICE_BY_PROVIDER = {
   google: "en-US-Neural2-F",
-  cartesia: "cartesia-default"
+  gemini: "Kore",
+  "gemini-lite": "Kore"
 } as const satisfies Record<(typeof TTS_PROVIDERS)[number], string>;
 
 export function isGoogleTtsVoice(voice: unknown): voice is (typeof GOOGLE_TTS_VOICES)[number] {
@@ -31,21 +125,17 @@ export function normalizeGoogleTtsVoice(voice: unknown): (typeof GOOGLE_TTS_VOIC
 }
 
 export function normalizeTtsProvider(provider: unknown): TtsProvider {
-  return provider === "cartesia" ? "cartesia" : "google";
+  if (isGeminiTtsProvider(provider)) return provider;
+  // Cartesia was retired; keep its subscribers on the Premium natural-voice tier.
+  if (provider === "cartesia") return "gemini";
+  return "google";
 }
 
 export function normalizeTtsVoice(provider: TtsProvider, voice: unknown): string {
-  if (provider === "cartesia") {
-    const normalized = typeof voice === "string" ? voice.trim() : "";
-    return normalized && !isGoogleTtsVoice(normalized) && !isLocalTtsVoice(normalized)
-      ? normalized
-      : DEFAULT_VOICE_BY_PROVIDER.cartesia;
+  if (isGeminiTtsProvider(provider)) {
+    return isGeminiTtsVoice(voice) ? voice : DEFAULT_VOICE_BY_PROVIDER[provider];
   }
   return normalizeGoogleTtsVoice(voice);
-}
-
-function isLocalTtsVoice(voice: string): boolean {
-  return voice.startsWith("khaya:") || voice.startsWith("ghananlp-");
 }
 
 export const ttsRequestSchema = z

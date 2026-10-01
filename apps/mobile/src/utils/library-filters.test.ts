@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReadingDocument } from "@/types";
-import { matchesLibraryFilter, matchesLibrarySearch } from "./library-filters";
+import { matchesLibraryFilter, matchesLibrarySearch, nextLibrarySort, sortLibraryDocuments } from "./library-filters";
 
 function documentFixture(overrides: Partial<ReadingDocument> = {}): ReadingDocument {
   return {
@@ -39,5 +39,25 @@ describe("library filters", () => {
   it("searches document titles and metadata", () => {
     expect(matchesLibrarySearch(documentFixture(), "company")).toBe(true);
     expect(matchesLibrarySearch(documentFixture(), "missing")).toBe(false);
+  });
+});
+
+describe("sortLibraryDocuments", () => {
+  const older = documentFixture({ id: "older", title: "zebra notes", updatedAt: "2026-09-01T00:00:00.000Z" });
+  const newer = documentFixture({ id: "newer", title: "Apple report", updatedAt: "2026-09-20T00:00:00.000Z" });
+  const started = documentFixture({ id: "started", title: "Middle", updatedAt: "2026-08-01T00:00:00.000Z", progress: { ...older.progress, percent: 40 } });
+
+  it("orders by recency, title, or in-progress items first without mutating input", () => {
+    const input = [older, started, newer];
+    expect(sortLibraryDocuments(input, "recent").map((item) => item.id)).toEqual(["newer", "older", "started"]);
+    expect(sortLibraryDocuments(input, "title").map((item) => item.id)).toEqual(["newer", "started", "older"]);
+    expect(sortLibraryDocuments(input, "in_progress").map((item) => item.id)).toEqual(["started", "newer", "older"]);
+    expect(input.map((item) => item.id)).toEqual(["older", "started", "newer"]);
+  });
+
+  it("cycles through every sort order", () => {
+    expect(nextLibrarySort("recent")).toBe("title");
+    expect(nextLibrarySort("title")).toBe("in_progress");
+    expect(nextLibrarySort("in_progress")).toBe("recent");
   });
 });

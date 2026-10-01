@@ -114,7 +114,43 @@ describe("settingsRouter", () => {
       .expect(400);
   });
 
-  it("stores Cartesia as an optional English provider", async () => {
+  it.each(["gemini", "gemini-lite"])("stores %s as an English provider", async (provider) => {
+    const response = await request(createTestApp())
+      .put("/api/settings")
+      .send({
+        provider: provider,
+        voice: "Aoede",
+        speed: 1,
+        targetLanguage: "en",
+        autoScroll: true,
+        highlightMode: "paragraph",
+        preferredContentTypes: ["webpage"],
+        articlesPerFeed: 10
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ provider, voice: "Aoede" });
+  });
+
+  it.each(["en-US-Neural2-J", "khaya:ewe:female"])("does not persist voice %s against English Gemini", async (voice) => {
+    const response = await request(createTestApp())
+      .put("/api/settings")
+      .send({
+        provider: "gemini",
+        voice,
+        speed: 1,
+        targetLanguage: "en",
+        autoScroll: true,
+        highlightMode: "paragraph",
+        preferredContentTypes: ["webpage"],
+        articlesPerFeed: 10
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ provider: "gemini", voice: "Kore" });
+  });
+
+  it("migrates a retired Cartesia selection to Gemini Flash TTS", async () => {
     const response = await request(createTestApp())
       .put("/api/settings")
       .send({
@@ -129,51 +165,33 @@ describe("settingsRouter", () => {
       })
       .expect(200);
 
-    expect(response.body).toMatchObject({ provider: "cartesia", voice: "cartesia-default" });
+    expect(response.body).toMatchObject({ provider: "gemini", voice: "Kore" });
   });
 
-  it("does not persist a Google voice against the Cartesia provider", async () => {
-    const response = await request(createTestApp())
-      .put("/api/settings")
-      .send({
-        provider: "cartesia",
-        voice: "en-US-Neural2-J",
-        speed: 1,
-        targetLanguage: "en",
-        autoScroll: true,
-        highlightMode: "paragraph",
-        preferredContentTypes: ["webpage"],
-        articlesPerFeed: 10
-      })
-      .expect(200);
-
-    expect(response.body).toMatchObject({ provider: "cartesia", voice: "cartesia-default" });
-  });
-
-  it("does not persist a local-language voice against English Cartesia", async () => {
-    const response = await request(createTestApp())
-      .put("/api/settings")
-      .send({
-        provider: "cartesia",
-        voice: "khaya:ewe:female",
-        speed: 1,
-        targetLanguage: "en",
-        autoScroll: true,
-        highlightMode: "paragraph",
-        preferredContentTypes: ["webpage"],
-        articlesPerFeed: 10
-      })
-      .expect(200);
-
-    expect(response.body).toMatchObject({ provider: "cartesia", voice: "cartesia-default" });
-  });
-
-  it("does not allow Free accounts to select Cartesia premium audio", async () => {
+  it("allows Free accounts to select Gemini Flash-Lite", async () => {
     const response = await request(createTestApp(undefined, "free"))
       .put("/api/settings")
       .send({
-        provider: "cartesia",
-        voice: "cartesia-default",
+        provider: "gemini-lite",
+        voice: "Kore",
+        speed: 1,
+        targetLanguage: "en",
+        autoScroll: true,
+        highlightMode: "paragraph",
+        preferredContentTypes: ["webpage"],
+        articlesPerFeed: 10
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ provider: "gemini-lite" });
+  });
+
+  it("does not allow Free accounts to select Gemini Flash premium audio", async () => {
+    const response = await request(createTestApp(undefined, "free"))
+      .put("/api/settings")
+      .send({
+        provider: "gemini",
+        voice: "Kore",
         speed: 1,
         targetLanguage: "en",
         autoScroll: true,

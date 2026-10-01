@@ -32,6 +32,21 @@ export async function consumeDailyUsage(userId: string, kind: string, quantity: 
   return Number(rows[0].quantity);
 }
 
+/**
+ * Credit back usage for work the provider did not deliver (for example, an AI
+ * request that failed and was answered from the saved text). Never below zero.
+ */
+export async function releaseDailyUsage(userId: string, kind: string, quantity: number): Promise<void> {
+  const normalizedQuantity = normalizePositiveInteger(quantity, "quantity");
+  const windowStart = startOfUtcDay(new Date());
+  await prisma.$executeRaw`
+    UPDATE "UsageBucket"
+    SET "quantity" = GREATEST(0, "quantity" - ${BigInt(normalizedQuantity)}),
+        "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "userId" = ${userId} AND "kind" = ${kind} AND "windowStart" = ${windowStart}
+  `;
+}
+
 export function usageLimitFromEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;

@@ -1,12 +1,13 @@
 import { useAuth } from "@clerk/expo";
 import { Redirect, useLocalSearchParams } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { colors } from "@/components/mobile-design";
 import { FirstRunOnboarding } from "@/components/onboarding-screen";
 import { SignInScreen } from "@/components/sign-in-screen";
 import { SetupFlow } from "@/components/setup-flow";
+import { deviceStorage } from "@/storage/device-storage";
+import { saveSetupPreferences, type SetupPreferences } from "@/setup/setup-preferences";
 import { isWebMcpChallengeEntry } from "@/utils/challenge-entry";
 import { screenshotMode } from "@/utils/screenshot-mode";
 
@@ -27,7 +28,7 @@ export default function IndexRedirect() {
       return;
     }
 
-    SecureStore.getItemAsync(onboardingStorageKey)
+    deviceStorage.getItem(onboardingStorageKey)
       .then((value) => setShowOnboarding(value !== "1"))
       .catch(() => setShowOnboarding(true))
       .finally(() => setOnboardingChecked(true));
@@ -48,7 +49,7 @@ export default function IndexRedirect() {
   if (showOnboarding) {
     const completeOnboarding = async (options?: { showSetup?: boolean }) => {
       try {
-        await SecureStore.setItemAsync(onboardingStorageKey, "1");
+        await deviceStorage.setItem(onboardingStorageKey, "1");
       } catch {
         // Continue into the app even if local persistence is unavailable.
       } finally {
@@ -61,9 +62,10 @@ export default function IndexRedirect() {
   }
 
   if (showSetup) {
-    const completeSetup = async () => {
+    const completeSetup = async (preferences?: SetupPreferences) => {
       try {
-        await SecureStore.setItemAsync("readmate.setup.completed.v1", "1");
+        if (preferences) await saveSetupPreferences(preferences);
+        await deviceStorage.setItem("readmate.setup.completed.v1", "1");
       } catch {
         // Continue into auth even if local persistence is unavailable.
       } finally {

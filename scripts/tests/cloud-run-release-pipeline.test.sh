@@ -217,8 +217,41 @@ assert_contains "${GCLOUD_CALLS}" "--tag ${CANDIDATE_TAG}"
 assert_not_contains "${GCLOUD_CALLS}" "update-traffic"
 assert_not_contains "${GCLOUD_CALLS}" "readmate-api-build-unrelated=100"
 assert_contains "${GCLOUD_CALLS}" "--remove-secrets=REVENUECAT_SECRET_API_KEY"
+assert_contains "${GCLOUD_CALLS}" "CARTESIA_API_KEY"
+assert_contains "${GCLOUD_CALLS}" "CARTESIA_VOICE_ID,CARTESIA_MODEL_ID"
 assert_not_contains "${GCLOUD_CALLS}" "REVENUECAT_SECRET_API_KEY=readmate-revenuecat-secret-api-key:latest"
 assert_not_contains "${GCLOUD_CALLS}" "REVENUECAT_ENTITLEMENT_ID=premium"
+
+# Unresolvable versions keep ":latest" and warn instead of failing.
+assert_contains "${CANDIDATE_OUTPUT}" "secret_pin=readmate-clerk-secret-key:latest (WARNING"
+
+: >"${GCLOUD_LOG}"
+: >"${STATE_FILE}"
+PINNED_OUTPUT="$(
+  FAKE_GCLOUD_LOG="${GCLOUD_LOG}" \
+  FAKE_GCLOUD_STATE="${STATE_FILE}" \
+  FAKE_ARTIFACT_JSON="${ARTIFACT_JSON}" \
+  FAKE_SERVICE_JSON_BEFORE="${SERVICE_JSON_BEFORE}" \
+  FAKE_SERVICE_JSON_AFTER="${SERVICE_JSON_AFTER}" \
+  FAKE_REVISION_JSON="${REVISION_JSON}" \
+  FAKE_CURL_LOG="${CURL_LOG}" \
+  FAKE_SECRET_VERSION=7 \
+  GCLOUD="${FAKE_GCLOUD}" \
+  CURL="${FAKE_CURL}" \
+  bash "${ROOT_DIR}/scripts/deploy-cloud-run-candidate.sh" \
+    "${IMAGE_TAG}" \
+    us-central1 \
+    "${SERVICE_NAME}" \
+    chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    https://app.example.com \
+    project-id \
+    "${RELEASE_ID}"
+)"
+assert_contains "${PINNED_OUTPUT}" "secret_pin=readmate-clerk-secret-key:7"
+GCLOUD_CALLS="$(<"${GCLOUD_LOG}")"
+assert_contains "${GCLOUD_CALLS}" "CLERK_SECRET_KEY=readmate-clerk-secret-key:7"
+assert_contains "${GCLOUD_CALLS}" "DATABASE_URL=readmate-database-app-url:7"
+assert_not_contains "${GCLOUD_CALLS}" "readmate-clerk-secret-key:latest"
 
 : >"${GCLOUD_LOG}"
 : >"${STATE_FILE}"

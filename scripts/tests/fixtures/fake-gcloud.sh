@@ -21,6 +21,12 @@ case "$1 $2 $3 $4" in
     if [[ "${secret_name}" == "${FAKE_UNAVAILABLE_SECRET:-}" ]]; then
       exit 1
     fi
+    # Version-number lookups (secret pinning) answer only when a test opts in.
+    if [[ "$*" == *"name.basename()"* ]]; then
+      [[ -n "${FAKE_SECRET_VERSION:-}" ]] || exit 1
+      printf '%s\n' "${FAKE_SECRET_VERSION}"
+      exit 0
+    fi
     if [[ "${secret_name}" == "${FAKE_DISABLED_SECRET:-}" ]]; then
       printf 'DISABLED\n'
     else

@@ -17,7 +17,7 @@ export type ReadingChunk = {
 };
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "ended" | "error";
-export type TtsProvider = "google" | "cartesia";
+export type TtsProvider = "google" | "gemini" | "gemini-lite";
 export type TargetLanguage = "en" | "tw" | "ee" | "gaa";
 
 export type PlayerState = {

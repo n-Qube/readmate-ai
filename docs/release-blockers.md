@@ -1,6 +1,134 @@
 # ReadMate AI Release Blockers
 
-Last updated: 2026-08-24
+Last updated: 2026-09-23
+
+## 2026-09-23 production-readiness review
+
+Reviewed against `docs/readmate-revamp-prd.md` and `docs/ReadMate-WebMCP-Product-Requirements-and-Implementation-Plan.docx`. Status: **NO-GO** until the P0 items below are closed.
+
+Verified in a clean install outside iCloud with Node 22: `typecheck` passes for API, extension and mobile; 626 Vitest tests pass (API 311, extension 149, mobile 166) plus 22 Firebase hosting tests; `npm run build` passes; `npm run check:dependencies` passes; the Prisma schema validates.
+
+### P0: blocks any production release
+
+1. **Treat GitHub as the only source of truth.** `n-Qube/readmate-ai` holds the 2026-08-30 challenge release. The local working copy it was published from is not linked to that remote: its git history is unrelated, its last commit is from 2026-05-28, and it tracks only 15 files. Changes made since the release were applied through a pull request. From now on, work from a clone of `n-Qube/readmate-ai`, require a green CI run (`.github/workflows/ci.yml`) before merging, and deploy only from commits on `main`.
+2. **The working copy lives in iCloud Drive with storage optimization on.** About 152k of 164k `node_modules` files, most of `apps/mobile/ios` and `apps/mobile/android`, and the native AirPlay/Cast module source (`ReadMateAirPlayModule.swift`, `ReadMateAirPlayModule.kt`, podspec) are evicted to the cloud (`dataless`). Reads block for about 25 s per file, so local `typecheck`, `test` and native builds hang. iCloud also created conflict copies (`* 2.*`). One of them, `app/(tabs)/index 2.tsx`, was a live Expo Router route, and another duplicated the Swift module class. Eight stale copies in source directories were moved to `~/readmate-sync-conflicts-2026-09-23/`. Fix: move the repository out of `~/Documents` (for example to `~/Developer/readmate`), or mark the folder "Keep Downloaded". Then run `npm ci`.
+3. **Local Node is 20.19.6 but `package.json` requires Node 22.13 or later.** `.nvmrc` now pins 22, so run `nvm use` in the repo. Homebrew `node@22` (22.22.0) is installed. Put it first on `PATH` or pin it with `.nvmrc`.
+4. **The external gates from 2026-08-24 are still unevidenced.** These are credential rotation, migrations applied by the migration role, Secret Manager, Clerk production configuration, the EAS production environment and new binaries, a backup restore drill, monitoring, and budget alerts. See the section below. None of them can be verified from the repository.
+
+### Live Gemini verification (2026-09-23, using production's Gemini key, no production changes)
+
+- **Interactions API response shape confirmed.** Audio arrives as `steps[].content[]` blocks `{type: "audio", mime_type: "audio/wav", data}`; `output_audio` is an SDK convenience only. The client parses the real response.
+- **TTS works on both tiers.** `gemini-3.8-flash-lite-tts` and `gemini-3.8-flash-tts` each returned a valid 24 kHz WAV in about 4 s for a short sentence. Long text was chunked and merged correctly.
+- **The study-pack diagnosis is confirmed.** On `gemini-2.5-flash`, a 24-card, 12-question pack took **19.4 s**, past the old 15 s timeout. With the fix it returns 24 cards, 12 questions across all four question types, and 12 key points. Focused flashcard and quiz generation takes about 3 s.
+- **Long-text latency.** For about 1.9k characters, the wait fell from 35.4 s (2,500-byte sections, 3 in parallel) to **16.0 s** (800-byte sections, 4 in parallel). Those are now the defaults (`GEMINI_TTS_CHUNK_BYTES`, `GEMINI_TTS_CONCURRENCY`). Still open: stream the first section, or have the apps request smaller segments when a Gemini voice is selected, to bring first audio under about 5 s.
+- **The Cartesia key was revoked by the owner on 2026-09-23.** Until the new API revision is promoted, Premium users who still have Cartesia selected get TTS errors on the live revision. Delete the `readmate-cartesia-api-key` secret only **after** promotion, because the live revision mounts it at startup.
+
+### P0 for the Gemini TTS release (added 2026-09-23)
+
+- **Live smoke test.** Google's documentation gives two different response shapes for the Interactions API (`output_audio.data` versus `{type:"audio"}` blocks in `steps`). The client accepts both, plus legacy `inlineData`. Only unit tests cover this path so far. After deploying a candidate, run this once for each provider:
+
+  ```bash
+  curl -X POST https://<candidate>/api/tts -H 'Authorization: Bearer <clerk-session-token>' -H 'Content-Type: application/json' \
+    --data '{"text":"ReadMate Gemini smoke test.","provider":"gemini-lite","voice":"Kore","speed":1}' --output /tmp/gemini-lite.wav
+  ```
+
+  Repeat with `"provider":"gemini"` using a Premium account. Check latency, the `X-ReadMate-TTS-Provider` header, and that the WAV plays.
+- **Pricing and quota.** The documentation does not give GA status, pricing or rate limits for `gemini-3.8-flash-tts` or `gemini-3.8-flash-lite-tts`. Confirm them in the Google Cloud console. Then set `FREE_TTS_DAILY_CHAR_LIMIT` and `PREMIUM_TTS_DAILY_CHAR_LIMIT` to match, and add a billing budget alert on the Gemini API key. Flash-Lite is enabled on the Free plan.
+- **Apply migration `20260923120000_retire_cartesia_tts`.** It moves saved `cartesia` settings to `gemini`/`Kore`. The API also normalizes `cartesia` → `gemini` on every read and write, so the order of migration and deploy does not matter.
+- **Retire Cartesia infrastructure after the deploy.** Revoke the Cartesia API key, delete the `readmate-cartesia-api-key` Secret Manager entry, and confirm that the new Cloud Run revision no longer references `CARTESIA_*` values. The deploy scripts no longer set them.
+- **Test on real devices.** Gemini returns 24 kHz mono WAV, about 2.9 MB per minute. That is larger than Google MP3. Confirm iOS and Android playback, the lock screen, and Chromecast/AirPlay casting, and check mobile data use on long documents.
+
+### Production API promoted (2026-09-23)
+
+- **Live:** `readmate-api-build-cce38ba86f3627c7` (image `sha256:c51a73f4…d5916`) has 100% of traffic.
+- **Rollback target:** `readmate-api-hist-5eab4ffdfbe06477`.
+- **Migration:** `20260923120000_retire_cartesia_tts` was applied. It was the only pending migration of 25.
+- **Signed-in production check:** settings, entitlements, summary views, a document write and read, text-free progress saves, Google TTS, Gemini Lite with Google fallback, the Premium gate, and cleanup all passed.
+- **Not yet verifiable:** study packs and Ask AI currently fall back because the free-tier `gemini-2.5-flash` quota (20 requests/day) is exhausted. Both passed on the candidate before the quota ran out.
+- **Follow-up promotion:** `readmate-api-build-2cba14e69cdde410` (image `sha256:6a683363…ea6551`) now has 100% of traffic. It is the same code with the retired Cartesia bindings removed (`--remove-secrets`).
+- **Rollback targets:** `readmate-api-build-cce38ba86f3627c7`, then `readmate-api-hist-5eab4ffdfbe06477`.
+- **Cartesia secret:** keep `readmate-cartesia-api-key` until rollback is no longer needed, because every older revision still mounts it and would fail to start without it. Its value is the key revoked on 2026-09-23, so keeping it is harmless.
+
+### EAS release builds (2026-09-23/24)
+
+- **Android `store-internal` build 68 and iOS `store-internal` build 157 finished.** Neither is uploaded to Play or TestFlight yet. Upload them with `eas submit --profile store-internal` (internal and TestFlight only), then test on real devices before any store review.
+- **Fixes needed to get the iOS build through:**
+  - `eas-build-pre-install` ran before `npm install`, but `validate-public-ui.cjs` needs `typescript`. The validators now run in `eas-build-post-install`.
+  - On iOS, prebuild and pod install run before post-install, and prebuild names the project `ReadMate`. The validator now discovers the project name instead of hardcoding `ReadMateAI`.
+  - The Live Activity widget target had no provisioning profile and blocked non-interactive builds. Store profiles now omit it (`READMATE_DEVICE_BUILD_NO_WIDGET=1`), since Live Activities are disabled in code.
+  - Release builds no longer require RevenueCat keys unless `EXPO_PUBLIC_PREMIUM_PURCHASES_ENABLED=true`.
+- **Local EAS commands** evaluate `app.config.js` with `.env` loading disabled. Before `eas build`, export the public production variables: `eas env:pull --environment production --path .env.local`, then `set -a; . ./.env.local; set +a`.
+
+### P0: the Gemini API key is on the Free Tier (found 2026-09-23)
+
+- Google's response: "Rate limit exceeded for model gemini-3.8-flash-lite-tts (**limit: 10 requests per day on Free Tier**)". The same key serves study packs and Ask AI, and `gemini-2.5-flash` is also limited to **20 requests/day** (`generate_content_free_tier_requests`).
+- **Owner action:** enable billing (a paid tier) for the Google AI Studio project that owns `readmate-gemini-api-key` at https://ai.dev/rate-limit, then set a budget alert. Do not offer Gemini voices publicly before this is done.
+- **Mitigation in code:** when Gemini TTS is rate limited, over quota, down, or unconfigured, `/api/tts` now answers with the default Google voice. It reports `X-ReadMate-TTS-Provider: google` and logs `tts_provider_fallback`, so playback never stops. Alert on that event, because a sustained rate means quota exhaustion.
+- **Production Clerk has no reviewer account.** `nii.nortey+readmate.playreview@gmail.com` does not exist in the production instance, which has 1 user. Create it before any App Store or Play review. It is referenced by the Play "Sign-in details" declaration.
+
+### P0: iOS 1.0.2 rejected for crashing on launch (store review, 2026-09-23)
+
+- **What Apple saw.** On 2026-08-24, App Review rejected 1.0.2 build 133 under Guideline 2.1(a): "crashed on launch" on an iPhone 17 Pro Max and an iPad Air 11-inch (M3), both on iOS 26.6. The live App Store version is 1.0.1.
+- **What the crash logs show.** In both logs, `RCTExceptionsManager reportFatal` leads to `abort()` on the TurboModule queue, **0.24 s after launch**. That is an uncaught JavaScript error at startup, turned fatal by release mode. The JS message is not in the `.ips` files, and the IPA for build 133 has expired from EAS, so its bundle cannot be inspected.
+- **Hypotheses ruled out.**
+  - Live Activities and widgets: loaded lazily and disabled (`ENABLE_IOS_LIVE_ACTIVITY = false`).
+  - RevenueCat: lazy and error-caught.
+  - A missing `EXPO_PUBLIC_READMATE_API_URL`: the export itself fails, so that build could never ship.
+- **Current code launches.** A Release build of this branch with production's public EAS variables (`APP_VARIANT=production`, Hermes) was installed on iOS 26.5 simulators. It stayed running and rendered onboarding on both an iPhone 17 and an iPad Air 11-inch (M3). This was built locally with Xcode 27 beta, while EAS uses Xcode 26.6.
+- **Build 146 is unverified.** It is attached to the 1.0.2 submission, but App Review's last message concerns build 133, and the page still offers "Resubmit to App Review". Build 146 was not built on EAS and has 0 TestFlight installs. **Do not resubmit 146 untested.**
+- **Path to resubmit.**
+  1. Deploy the API.
+  2. Build `store-internal` on EAS from this branch.
+  3. Install it from TestFlight on at least one iPhone and one iPad, with a cold launch and a signed-out first run.
+  4. Replace build 146 on the 1.0.2 version.
+  5. Resubmit with a note that the launch crash was fixed and verified on device.
+- **Found during the repro.** On iPad, the onboarding screen does not show the page dots or the Skip control that the iPhone shows.
+- **Play Console.** Production access needs 12+ opted-in testers for 14 days, and the Alpha closed-testing track has **no tester list attached** (0 opted in; 1 country; build 59). The **Foreground service permissions** declaration is overdue and blocks all app updates; the use is media playback. The other 10 App content declarations were completed on Jul 1–2. Review Data safety again for Gemini TTS and link sharing.
+
+### P0: GitHub Actions cannot run
+
+- Every CI run on `n-Qube/readmate-ai` fails before starting: "The job was not started because your account is locked due to a billing issue." Resolve it in the GitHub billing settings for the account. Until then, run `npm ci && npm run verify:release` on a clean clone before merging. On 2026-09-23 this passed for PR #1.
+
+### P1: performance (fixed 2026-09-23; verify on devices)
+
+- **Mobile no longer downloads every document's text with the library.**
+  - Lists call `GET /api/documents?view=summary`. It returns the same shape without reading blocks or stored HTML, plus `blockCount`.
+  - Progress saves use `PATCH /api/documents/:id/progress?view=summary`.
+  - Playback loads a document in full on first play, sharing the document screen's `["document", id]` cache. A summary item never replaces text that is already loaded (`withKnownBlocks`).
+  - Default API responses are unchanged, so installed app builds keep working. **Deploy the API before shipping the new mobile build**: older APIs reject `view` with a 400.
+  - **Device check:** play from Home, Library and History; resume mid-document; skip blocks; use lock-screen controls and Cast; switch items while one is loading.
+- **Flashcards and quiz regenerate on their own.** `/api/learning/:id/flashcards` and `/quiz` call focused Gemini prompts with single-part schemas. They previously generated a whole pack, which tripled cost and replaced the *other* part in the review store, orphaning quiz attempts. Syncs now touch only the part that was generated.
+- **AI quota is refunded** when the Gemini call fails and fallback content is served, including for Ask AI (`releaseDailyUsage`).
+
+### P1: product requirements gaps
+
+- **Share into ReadMate is on for Android and ready for iOS.** `expo-share-intent@7.0.0` (Expo SDK 56) adds an Android `SEND text/*` filter, verified with `expo prebuild`. A shared link opens Add content pre-filled, and the user taps Add to save it. iOS is configured but switched off (`"disableIOS": true` in `app.json`) because the Share Extension needs its own identifiers. To enable it:
+  1. In the Apple Developer portal, register the extension's bundle ID (`ai.readmate.mobile.share-extension`) and add the existing App Group `group.ai.readmate.mobile` to it.
+  2. Set `disableIOS` to `false`.
+  3. Run `eas build -p ios` interactively once so EAS creates the provisioning profile.
+  4. Test sharing from Safari on a device.
+- **Learning model access.** Learning features default to `GEMINI_MODEL=gemini-2.5-flash`. There is no shutdown date, but Google now limits 2.5 access to projects that have used it before. A new GCP project or API key would lose access. Plan a move to a 3.x model, and re-validate the structured study output before switching.
+- **WebMCP production origin.** Chrome serves WebMCP behind an origin trial (Chrome 153+). Register the trial for the final `WEB_APP_ORIGIN` and deploy with `npm run deploy:firebase-hosting:guarded` so the `Origin-Trial` header is injected. Add the origin to the Clerk allowed origins and to the API `WEB_APP_ORIGIN`.
+- **Extension version** is bumped to `0.1.6` in `package.json`, `manifest.json` and the lockfile.
+
+### Fixed in this review
+
+- **Gemini 3.8 Flash TTS and Flash-Lite TTS added** as providers `gemini` (Premium) and `gemini-lite` (all plans) through the existing `GEMINI_API_KEY`. The request uses `store: false`. Text is split into sentence-bounded sections, synthesized three at a time, retried on 408, 429 and 5xx, and merged into WAV. Upstream error bodies are never echoed back. The 30 prebuilt voices are available in the API, extension and WebMCP. Mobile shows eight curated reading voices.
+- **Cartesia removed** from the API, extension, mobile, deploy scripts and environment templates. Saved and legacy-client `cartesia` selections migrate to Gemini Flash. `GET /api/tts/voices` now returns the Gemini catalogue, so installed app builds keep working.
+- **Playback speed was applied twice.** Clients sent `speed` to the server, where Google baked it in with `speakingRate`, and then set `playbackRate` again, so 1.5× played at about 2.25×. Local playback now requests neutral-rate audio. Android Cast URLs keep speed baked in and play at rate 1.
+- **The dependency gate failed in CI.** `sharp` in the API runtime had libheif CVEs, and `@xmldom/xmldom`, `js-yaml` and `browserslist` in Expo tooling had high advisories. Fixed with in-major patch bumps and overrides.
+- **Extension TTS disclosure.** The privacy card now names the provider that receives text on Play, as the PRD privacy requirement asks.
+- **Extension voice Preview button.** It had no click handler and was covered by the overlay `<select>`. It now plays a short sample.
+- **Extension premium provider.** Free accounts see Gemini Flash as locked instead of failing at playback.
+- **AI study packs were most likely failing into fallback.** On `gemini-2.5-flash`, thinking tokens shared the 8,192-token output cap, which truncated the JSON, and the call inherited the 15 s outbound timeout. Thinking is now off for 2.5 Flash, output is capped at 16,384 tokens, generation has its own 45 s deadline (`GEMINI_LEARNING_TIMEOUT_MS`), and truncated or blocked responses are logged explicitly. Fallback content no longer overwrites a saved study set (`preserved: true`). Both apps now tell users when material is quick notes rather than AI output. **Verify live:** generate a 24-card, 12-question pack on a long document and confirm `fallback: false`.
+- **Rate limits.** Content ingestion, uploads, sources, account deletion and all data routes are now per-user rate limited, not only TTS and learning. Limits are keyed through `getAuth()` rather than the deprecated `req.auth` proxy. `trust proxy` is set for Cloud Run, and 429 responses are JSON.
+- **Security.** Added nosniff, `X-Frame-Options: DENY`, `no-referrer`, a deny-by-default CSP, and HSTS in production. Removed `X-Powered-By`. The extension no longer treats a raw session token left by an older build as a signed-in session.
+- **UI dead-ends.**
+  - Mobile Library's ☰ button did nothing; it now cycles through sort orders.
+  - The "Documents" chip was truncated at 375 px; it now reads "Docs".
+  - Home's "…" button had no action; it was removed.
+  - The extension popup's PDF and Save buttons were permanently disabled; they now open the side panel.
+- **WebMCP.** Added Chrome's `consequentialHint` annotation: true for the three write tools, false for the read and listening tools. The six PRD tools, declarative forms without `toolautosubmit`, `respondWith`, abort-signal registration, redacted output envelopes, audit and idempotency, and the 40-case evaluation set were already present and match Chrome's current API.
 
 ## 2026-08-24 production-readiness gate
 

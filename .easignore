@@ -36,7 +36,7 @@ apps/mobile/ios/*.xcarchive
 *.aab
 *.apk
 *.tar.gz
-**/* 2.*
+**/* [2-9].*
 **/* 3
 README.md
 Dockerfile

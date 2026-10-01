@@ -2205,6 +2205,9 @@ input, select {
 }
 
 .settings-voice-play {
+  /* Sit above the transparent overlay select that fills the picker row. */
+  position: relative;
+  z-index: 1;
   width: 22px;
   height: 22px;
   border-radius: 999px;
@@ -2217,6 +2220,11 @@ input, select {
   justify-content: center;
   flex-shrink: 0;
   padding-left: 1px;
+}
+
+.settings-voice-play:disabled {
+  opacity: 0.5;
+  cursor: progress;
 }
 
 .settings-overlay-select {
