@@ -9,9 +9,7 @@ import { EditorialImage } from "@/components/editorial-image";
 import { colors, displayText, radius } from "@/components/mobile-design";
 import {
   AI_AUDIO_DISCLOSURE_ACCESSIBILITY_LABEL,
-  AI_AUDIO_DISCLOSURE_DETAIL,
-  AI_AUDIO_DISCLOSURE_TITLE,
-  compactAiAudioDisclosure,
+  compactPlaybackState,
   shouldShowAiAudioDisclosure
 } from "@/playback/ai-audio-disclosure";
 import { usePlaybackManager, type PlaybackState } from "@/playback/playback-manager";
@@ -157,9 +155,7 @@ export function PlaybackBar({
               numberOfLines={1}
               style={{ color: "#d9c2c6", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 }}
             >
-              {showAiAudioDisclosure
-                ? compactAiAudioDisclosure(isCompleted ? "Completed" : stateLabel(currentState))
-                : isCompleted ? "Completed" : stateLabel(currentState)}
+              {compactPlaybackState(isCompleted ? "Completed" : stateLabel(currentState))}
             </Text>
             <Text selectable numberOfLines={2} style={{ color: "#fffdf8", fontSize: 15, lineHeight: 18, fontWeight: "700", ...displayText }}>{activeDocument?.title ?? "Choose something to read"}</Text>
             <Progress percent={clampedPercent} dark />
@@ -246,7 +242,6 @@ export function PlaybackBar({
           </View>
         ) : null}
 
-        {showAiAudioDisclosure ? <AiAudioDisclosure tone="light" /> : null}
 
         <View style={{ gap: 5, paddingHorizontal: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 }}>
@@ -344,7 +339,6 @@ export function PlaybackBar({
         <PlayerUtility label={outputRouteLabel} icon="airplayaudio" disabled={playbackBlocked} onPress={chooseOutput} />
       </View>
 
-      {showAiAudioDisclosure ? <AiAudioDisclosure /> : null}
 
       {playback.outputState.connected ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.08)" }}>
@@ -402,24 +396,6 @@ export function PlaybackBar({
           <QueueButton label="Next article" disabled={playbackBlocked || !nextDocument} onPress={() => jumpToDocument(nextDocument)} icon="chevron.right" />
         </View>
       ) : null}
-    </View>
-  );
-}
-
-function AiAudioDisclosure({ tone = "dark" }: { tone?: "light" | "dark" }) {
-  const light = tone === "light";
-  return (
-    <View
-      accessible
-      accessibilityLabel={AI_AUDIO_DISCLOSURE_ACCESSIBILITY_LABEL}
-      accessibilityRole="text"
-      style={{ flexDirection: "row", alignItems: "flex-start", gap: 9, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, backgroundColor: light ? colors.purpleSoft : "rgba(255,255,255,0.08)" }}
-    >
-      <AppIcon name="sparkles" size={18} color={light ? colors.purple : "#d8eadc"} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text selectable style={{ color: light ? colors.ink : "#fffdf8", fontSize: 12, fontWeight: "800" }}>{AI_AUDIO_DISCLOSURE_TITLE}</Text>
-        <Text selectable style={{ color: light ? colors.muted : "#afbbb2", fontSize: 10, lineHeight: 14 }}>{AI_AUDIO_DISCLOSURE_DETAIL}</Text>
-      </View>
     </View>
   );
 }

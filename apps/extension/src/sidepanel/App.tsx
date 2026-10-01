@@ -20,7 +20,7 @@ import { isLikelyPdfUrl, pdfSourceUrlFromTab } from "./pdfTab";
 import { adjacentChunkIndex, type ChunkDirection } from "./playbackNavigation";
 import { languageProviderLabel } from "./providerLabel";
 import { parseSidePanelRoute, SIDE_PANEL_ROUTE_KEY, type SidePanelTab } from "./sidepanelRoute";
-import { syntheticSpeechDisclosure, type SpeechSource } from "./speechDisclosure";
+import { type SpeechSource } from "./speechDisclosure";
 import { STUDY_AI_DISCLOSURE } from "./studyDisclosure";
 import { resolveLearningTarget } from "./studyTarget";
 import { deriveSyncState } from "./syncState";
@@ -104,7 +104,7 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
   const [quizAnswers, setQuizAnswers] = useState<boolean[]>([]);
   const [quizAnswerValues, setQuizAnswerValues] = useState<string[]>([]);
   const [quizSelected, setQuizSelected] = useState<number | null>(null);
-  const [speechSource, setSpeechSource] = useState<SpeechSource>("cloud");
+  const [, setSpeechSource] = useState<SpeechSource>("cloud");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState(false);
@@ -434,7 +434,6 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
   const currentProgress = activeHistoryDocument?.progress.percent ?? percent;
   const remainingLabel = hasLoadedContent ? `${remaining}s remaining` : "Ready when you are";
   const currentTabIsPdf = Boolean(currentTabInfo?.url && isLikelyPdfUrl(currentTabInfo.url));
-  const speechDisclosure = syntheticSpeechDisclosure(speechSource, providerRouteLabel);
 
   async function refreshHistory(apiBaseUrl = settings?.apiBaseUrl, token = auth?.token): Promise<ReadingDocument[]> {
     if (!apiBaseUrl) return [];
@@ -1963,11 +1962,6 @@ export function App({ clerk }: { clerk?: ClerkBridge }) {
               {currentExcerpt ? (
                 <p className="player-excerpt">{currentExcerpt}</p>
               ) : null}
-
-              <div className="player-speech-disclosure" role="note" aria-label="Synthetic voice disclosure">
-                <Sparkles aria-hidden="true" />
-                <span>{speechDisclosure}</span>
-              </div>
 
               <div className="controls" aria-label="Playback controls">
                 <button

@@ -16,11 +16,8 @@ export function shouldShowAiAudioDisclosure(
   );
 }
 
-export function compactAiAudioDisclosure(playbackState: string): string {
-  const state = playbackState.trim();
-  return state
-    ? `${AI_AUDIO_DISCLOSURE_TITLE} · ${state}`
-    : AI_AUDIO_DISCLOSURE_TITLE;
+export function compactPlaybackState(playbackState: string): string {
+  return playbackState.trim() || "Ready";
 }
 
 export function aiAudioMetadataSubtitle(context?: string | null): string {
