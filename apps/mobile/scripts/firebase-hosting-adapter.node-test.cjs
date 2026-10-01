@@ -31,6 +31,7 @@ test("merges Expo client assets and server HTML into safe Firebase routes", (t) 
   assert.equal(read(path.join(fixture.outputDir, "challenge-demo.html")), "challenge-demo-article");
   assert.equal(read(path.join(fixture.outputDir, "challenge-feed.xml")), "challenge-atom-feed");
   assert.equal(read(path.join(fixture.outputDir, "index.html")), "root");
+  assert.equal(read(path.join(fixture.outputDir, "callback.html")), "callback");
   assert.equal(read(path.join(fixture.outputDir, "library.html")), "library");
   assert.equal(read(path.join(fixture.outputDir, "history.html")), "history");
   assert.equal(read(path.join(fixture.outputDir, "study.html")), "study");
@@ -46,6 +47,21 @@ test("merges Expo client assets and server HTML into safe Firebase routes", (t) 
     configPath: defaultConfigPath,
     env: {}
   }));
+});
+
+test("rejects an export missing the OAuth callback before replacing the deployed artifact", (t) => {
+  const fixture = createFixture(t);
+  const manifestPath = path.join(fixture.exportDir, "server/_expo/routes.json");
+  const manifest = JSON.parse(read(manifestPath));
+  manifest.htmlRoutes = manifest.htmlRoutes.filter((entry) => entry.page !== "/callback");
+  write(manifestPath, JSON.stringify(manifest));
+  const priorOutput = path.join(fixture.outputDir, "last-known-good.html");
+  write(priorOutput, "last-known-good");
+  assert.throws(
+    () => prepareFirebaseHosting({ exportDir: fixture.exportDir, outputDir: fixture.outputDir, env: {} }),
+    /callback/
+  );
+  assert.equal(read(priorOutput), "last-known-good");
 });
 
 test("rejects two Expo pages that would overwrite one friendly route with different HTML", (t) => {
@@ -168,6 +184,7 @@ function createFixture(t) {
   const htmlRoutes = [
     route("/(tabs)/index", "root"),
     route("/index", "root"),
+    route("/callback", "callback"),
     route("/(tabs)/library", "library"),
     route("/(tabs)/history", "history"),
     route("/(tabs)/study", "study"),
