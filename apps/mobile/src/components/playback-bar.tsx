@@ -79,6 +79,9 @@ export function PlaybackBar({
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const isCompleted = clampedPercent >= 100 && !["playing", "loading", "buffering"].includes(currentState);
   const showAiAudioDisclosure = shouldShowAiAudioDisclosure(variant, Boolean(activeDocument));
+  const openPlayerAccessibilityLabel = showAiAudioDisclosure
+    ? `Open full player. ${AI_AUDIO_DISCLOSURE_ACCESSIBILITY_LABEL}`
+    : "Open full player";
   const outputRouteLabel = playback.outputState.connected
     ? playback.outputState.deviceName ?? (playback.outputState.platform === "chromecast" ? "Chromecast" : "AirPlay")
     : Platform.OS === "android" ? "Chromecast" : "AirPlay";
@@ -146,7 +149,7 @@ export function PlaybackBar({
   if (variant === "compact") {
     return (
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderRadius: radius.xl, borderCurve: "continuous", backgroundColor: colors.player, boxShadow: "0 16px 34px -24px rgba(18,38,28,0.82)" }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={showAiAudioDisclosure ? `Open full player. ${AI_AUDIO_DISCLOSURE_ACCESSIBILITY_LABEL}` : "Open full player"} onPress={openPlayer} style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={openPlayerAccessibilityLabel} onPress={openPlayer} style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12 }}>
           <EditorialImage document={activeDocument} style={{ width: 62, height: 62, borderRadius: radius.md }} />
           <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
             <Text
@@ -170,7 +173,7 @@ export function PlaybackBar({
         >
           <AppIcon name={playIcon(currentState, isCompleted)} size={20} color={colors.player} weight="bold" />
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Open full player" onPress={openPlayer} style={{ width: 28, height: 48, alignItems: "center", justifyContent: "center" }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={openPlayerAccessibilityLabel} onPress={openPlayer} style={{ width: 28, height: 48, alignItems: "center", justifyContent: "center" }}>
           <AppIcon name="chevron.right" size={18} color="#d5ddd6" />
         </Pressable>
       </View>
@@ -185,7 +188,7 @@ export function PlaybackBar({
       <View style={{ gap: 8 }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Open full player"
+          accessibilityLabel={openPlayerAccessibilityLabel}
           onPress={openPlayer}
           style={{ height: 266, overflow: "hidden", borderRadius: radius.xxl, borderCurve: "continuous", backgroundColor: colors.player }}
         >
@@ -300,7 +303,7 @@ export function PlaybackBar({
 
   return (
     <View style={{ gap: 16, padding: 16, borderRadius: radius.xxl, borderCurve: "continuous", backgroundColor: colors.player, boxShadow: "0 20px 42px -30px rgba(18,38,28,0.82)" }}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Open full player" onPress={openPlayer} style={{ flexDirection: "row", gap: 14 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={openPlayerAccessibilityLabel} onPress={openPlayer} style={{ flexDirection: "row", gap: 14 }}>
         <EditorialImage document={activeDocument} style={{ width: 106, height: 106, borderRadius: radius.lg }} />
         <View style={{ flex: 1, justifyContent: "space-between", paddingVertical: 2 }}>
           <View style={{ gap: 5 }}>
